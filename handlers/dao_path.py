@@ -83,6 +83,8 @@ def _result_text(res: dict) -> str:
         return "此道途已臻当前最高阶。"
     if s == "no_daohang":
         return f"道行不足（需 {res['need']}，现有 {res['have']}）。"
+    if s == "no_ascension_points":
+        return f"飞升点不足（需 {res['need']}，现有 {res['have']}）。"
     if s == "no_material":
         return f"材料不足：{res['item']}（需 {res['need']}，现有 {res['have']}）。"
     if s == "cooldown":

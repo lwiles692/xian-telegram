@@ -152,6 +152,69 @@ async def test_custom_price_listing_is_honored(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_custom_quantity_listing_is_honored(temp_db):
+    uid = 9715
+    await character.create(uid, "seller-qty")
+    await character.add_item(uid, "星陨砂", 4)
+
+    res = await market.create_listing(uid, "星陨砂", 3, 900, now=1000)
+
+    assert res["status"] == "ok"
+    assert res["qty"] == 3
+    assert await character.item_qty(uid, "星陨砂") == 1
+
+
+@pytest.mark.asyncio
+async def test_listing_rejects_illegal_quantity_and_price(temp_db):
+    uid = 9716
+    await character.create(uid, "bad-list")
+    await character.add_item(uid, "星陨砂", 1)
+
+    assert (await market.create_listing(uid, "星陨砂", 0, 100, now=1000))["status"] == "bad_request"
+    assert (await market.create_listing(uid, "星陨砂", 1, 0, now=1000))["status"] == "bad_request"
+    assert await character.item_qty(uid, "星陨砂") == 1
+
+
+@pytest.mark.asyncio
+async def test_listing_editor_reflects_adjusted_quantity(temp_db):
+    from handlers.market import render_price_editor
+
+    uid = 9717
+    await character.create(uid, "qty-editor")
+    await character.add_item(uid, "星陨砂", 3)
+    text, markup = await render_price_editor(uid, "星陨砂", 500, qty=2)
+
+    assert "星陨砂 ×2" in text
+    assert "非绑定库存：3" in text
+    assert "总价：500 灵石" in text
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert "➖ 1" in labels
+    assert "➕ 1" in labels
+    assert any("×2 / 500" in x for x in labels)
+
+
+@pytest.mark.asyncio
+async def test_market_audit_flags_frequent_trades(temp_db):
+    seller, buyer = 9718, 9719
+    await character.create(seller, "audit-seller")
+    await character.create(buyer, "audit-buyer")
+    await character.add_item(seller, "星陨砂", 3)
+    await character.add_stone(buyer, 1000)
+    for idx in range(3):
+        listing = await market.create_listing(seller, "星陨砂", 1, 100 + idx, now=1000 + idx)
+        assert (await market.buy(buyer, listing["listing_id"], now=1100 + idx))["status"] == "ok"
+
+    rows = await market.audit_frequent_trades(now=2000, window_seconds=2000, min_trades=3)
+    report = await market.audit_report(now=2000)
+
+    assert rows
+    assert rows[0]["seller_id"] == seller
+    assert rows[0]["buyer_id"] == buyer
+    assert rows[0]["trades"] == 3
+    assert report["frequent_trades"]
+
+
+@pytest.mark.asyncio
 async def test_market_hourly_broadcast_sends_recent_listings_once(temp_db):
     class FakeBot:
         def __init__(self):

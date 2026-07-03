@@ -89,11 +89,24 @@ async def rank_up(user_id: int, path_key: str = None, now: int = None) -> dict:
             have = await _item_qty_conn(conn, user_id, key)
             if have < qty:
                 return {"status": "no_material", "item": key, "need": qty, "have": have}
+        ascension_points = int(cost.get("ascension_points", 0) or 0)
+        if ascension_points:
+            cur = await conn.execute("SELECT points FROM ascension WHERE user_id=?", (user_id,))
+            asc = await cur.fetchone()
+            await cur.close()
+            have_points = int(asc["points"] or 0) if asc else 0
+            if have_points < ascension_points:
+                return {"status": "no_ascension_points", "need": ascension_points,
+                        "have": have_points}
         await conn.execute(
             "UPDATE characters SET daohang=daohang-? WHERE user_id=?",
             (cost["daohang"], user_id))
         for key, qty in cost.get("items", {}).items():
             await _consume_item_conn(conn, user_id, key, qty)
+        if ascension_points:
+            await conn.execute(
+                "UPDATE ascension SET points=points-?, updated_at=? WHERE user_id=?",
+                (ascension_points, now, user_id))
         await conn.execute(
             "UPDATE dao_paths SET rank=? WHERE user_id=? AND path_key=?",
             (target_rank, user_id, row["path_key"]))

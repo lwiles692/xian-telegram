@@ -5,6 +5,9 @@ WAR_TZ_OFFSET_SECONDS = 8 * 3600
 WAR_WEEKDAY = 5          # Monday=0 … Saturday=5
 WAR_START_HOUR = 20
 WAR_END_HOUR = 21        # 左闭右开：[20:00, 21:00)
+WAR_STAMINA_COST = 20
+WAR_ACTION_DURATION_SECONDS = 10 * 60
+WAR_NO_STAMINA_WINDOW_SECONDS = 1
 
 # 据点守卫：成员进攻据点须先击败守卫（复用战斗引擎）才计入宗门积分（spec §8.1）。
 # 守卫按元婴/化神前段（realm2 上锚附近）配置——化神圆满成员可稳胜，低境界会落败。

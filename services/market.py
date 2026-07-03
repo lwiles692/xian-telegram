@@ -14,6 +14,8 @@ MARKET_TAX_RATE = 0.05
 MIN_PRICE = 1
 MARKET_BROADCAST_WINDOW = 3600
 MARKET_BROADCAST_LIMIT = 10
+AUDIT_FREQUENT_WINDOW_SECONDS = 24 * 3600
+AUDIT_FREQUENT_MIN_TRADES = 3
 
 
 async def list_active(limit: int = 20) -> list[dict]:
@@ -113,6 +115,28 @@ async def audit_suspicious(limit_price: int = 1_000_000) -> list[dict]:
         "SELECT * FROM market_listings WHERE price>=? ORDER BY price DESC",
         (limit_price,))
     return [_format(row) for row in rows]
+
+
+async def audit_frequent_trades(now: int = None, window_seconds: int = AUDIT_FREQUENT_WINDOW_SECONDS,
+                                min_trades: int = AUDIT_FREQUENT_MIN_TRADES) -> list[dict]:
+    now = int(time.time()) if now is None else now
+    since = now - int(window_seconds)
+    rows = await db.fetchall(
+        "SELECT seller_id, buyer_id, COUNT(*) AS trades, SUM(price) AS total_price, "
+        "MIN(updated_at) AS first_at, MAX(updated_at) AS last_at "
+        "FROM market_listings "
+        "WHERE status='sold' AND buyer_id IS NOT NULL AND updated_at>? AND updated_at<=? "
+        "GROUP BY seller_id, buyer_id HAVING trades>=? "
+        "ORDER BY trades DESC, total_price DESC",
+        (since, now, int(min_trades)))
+    return [dict(row) for row in rows]
+
+
+async def audit_report(limit_price: int = 1_000_000, now: int = None) -> dict:
+    return {
+        "high_price": await audit_suspicious(limit_price),
+        "frequent_trades": await audit_frequent_trades(now=now),
+    }
 
 
 async def notify_recent_listings(bot, now: int = None) -> dict:

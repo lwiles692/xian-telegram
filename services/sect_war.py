@@ -6,6 +6,7 @@ import time
 
 from config import sect_war as CFG
 from models import db
+from services import activity
 from services import character
 from services.combat import Combatant, simulate
 
@@ -41,12 +42,35 @@ async def capture(user_id: int, outpost_key: str, score: int = None, now: int = 
                 "weekday": CFG.WAR_WEEKDAY,
                 "start_hour": CFG.WAR_START_HOUR, "end_hour": CFG.WAR_END_HOUR}
     outpost = CFG.OUTPOSTS[outpost_key]
-    cur = await db.fetchone("SELECT sect_id FROM sect_members WHERE user_id=?", (user_id,))
-    if not cur:
-        return {"status": "not_member"}
-    sect_id = cur["sect_id"]
+    async with db.transaction() as conn:
+        cur = await conn.execute("SELECT sect_id FROM sect_members WHERE user_id=?", (user_id,))
+        member = await cur.fetchone()
+        await cur.close()
+        if not member:
+            return {"status": "not_member"}
+        sect_id = member["sect_id"]
+        row = await character._select_character(conn, user_id)
+        if not row:
+            return {"status": "missing"}
+        welfare = await character._sect_welfare(conn, user_id)
+        stamina, stamina_at = character._settled_stamina(row, now, welfare)
+        if stamina < CFG.WAR_STAMINA_COST:
+            await conn.execute(
+                "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+                (stamina, stamina_at, user_id))
+            await activity.record_virtual_window(
+                user_id, "sect_war", outpost_key, now,
+                CFG.WAR_NO_STAMINA_WINDOW_SECONDS, conn=conn)
+            return {"status": "no_stamina", "need": CFG.WAR_STAMINA_COST, "have": stamina}
+        left = stamina - CFG.WAR_STAMINA_COST
+        await conn.execute(
+            "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+            (left, stamina_at, user_id))
+        await activity.record_virtual_window(
+            user_id, "sect_war", outpost_key, now,
+            CFG.WAR_ACTION_DURATION_SECONDS, conn=conn)
+        char = character._from_row(row, left, stamina_at)
     # spec §8.1：先复用战斗引擎击败据点守卫，胜方才计入宗门积分；败则无积分。
-    char = await character.get(user_id)
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
     mods = await character.combat_mods(user_id)
@@ -58,7 +82,7 @@ async def capture(user_id: int, outpost_key: str, score: int = None, now: int = 
         seed=random.getrandbits(32), max_rounds=None)
     if result["winner"] is not player:
         return {"status": "defeated", "outpost": outpost["name"],
-                "guard": outpost["guard"]["name"]}
+                "guard": outpost["guard"]["name"], "stamina_left": char.stamina}
     gain = int(outpost["win_score"] if score is None else score)
     season = _season(now)
     async with db.transaction() as conn:
@@ -68,7 +92,8 @@ async def capture(user_id: int, outpost_key: str, score: int = None, now: int = 
             "VALUES(?,?,?,?,?) "
             "ON CONFLICT(sect_id, outpost_key) DO UPDATE SET score=score+?, season=?, updated_at=?",
             (sect_id, outpost_key, gain, season, now, gain, season, now))
-        return {"status": "ok", "outpost": outpost["name"], "score": gain}
+        return {"status": "ok", "outpost": outpost["name"], "score": gain,
+                "stamina_left": char.stamina}
 
 
 async def settle_season(now: int = None) -> dict:

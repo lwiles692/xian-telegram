@@ -8,7 +8,7 @@ RANK_UP_COSTS = {
     1: {"daohang": 100, "items": {}},
     2: {"daohang": 300, "items": {"星陨砂": 1}},
     3: {"daohang": 800, "items": {"幽都魂晶": 1}},
-    4: {"daohang": 1600, "items": {"天外残玉": 1}},
+    4: {"daohang": 1600, "items": {"天外残玉": 1}, "ascension_points": 1},
 }
 SWITCH_TOKEN = "转修令"
 SWITCH_STONE_COST = 2000
