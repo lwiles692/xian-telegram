@@ -57,6 +57,22 @@ RECIPES = {
         "stone": 120, "materials": {"玄铁矿": 4, "妖丹": 2, "天材地宝": 1},
         "output": {"kind": "equipment", "key": "聚灵佩"}, "default": False,
     },
+    "forge_yuanying_blade": {
+        "name": "天魔刃", "type": "forge", "realm": 3, "seconds": _minutes(24),
+        "stone": 980, "materials": {"雷纹玄铁": 4, "天魔残页": 3, "古战魂晶": 2, "器魂": 4},
+        "output": {"kind": "equipment", "key": "天魔刃"}, "default": False,
+    },
+    "forge_yuanying_armor": {
+        "name": "战魂甲", "type": "forge", "realm": 3, "seconds": _minutes(26),
+        "stone": 1000, "materials": {"白骨精华": 5, "腐泽妖核": 4, "古战魂晶": 3, "器魂": 5},
+        "output": {"kind": "equipment", "key": "战魂甲"}, "default": False,
+    },
+    "forge_yuanying_accessory": {
+        "name": "古战佩", "type": "forge", "realm": 3, "seconds": _minutes(28),
+        "stone": 960,
+        "materials": {"阴风石": 4, "幽冥草": 4, "劫火残晶": 3, "天魔残页": 2, "器魂": 4},
+        "output": {"kind": "equipment", "key": "古战佩"}, "default": False,
+    },
     "forge_huashen_sword": {
         "name": "陨星剑", "type": "forge", "realm": 4, "seconds": _minutes(30),
         "stone": 1800, "materials": {"星陨砂": 8, "天外残玉": 2, "器魂": 8},
@@ -71,6 +87,21 @@ RECIPES = {
         "name": "太虚佩", "type": "forge", "realm": 4, "seconds": _minutes(40),
         "stone": 2200, "materials": {"星陨砂": 4, "幽都魂晶": 4, "天外残玉": 3, "器魂": 10},
         "output": {"kind": "equipment", "key": "太虚佩"}, "default": False,
+    },
+    "forge_huashen_banner": {
+        "name": "星河幡", "type": "forge", "realm": 4, "seconds": _minutes(32),
+        "stone": 2100, "materials": {"星陨砂": 6, "天外残玉": 3, "化神丹残方": 4, "器魂": 8},
+        "output": {"kind": "equipment", "key": "星河幡"}, "default": False,
+    },
+    "forge_huashen_robe": {
+        "name": "星陨袍", "type": "forge", "realm": 4, "seconds": _minutes(36),
+        "stone": 2200, "materials": {"星陨砂": 5, "幽都魂晶": 5, "天外残玉": 3, "器魂": 9},
+        "output": {"kind": "equipment", "key": "星陨袍"}, "default": False,
+    },
+    "forge_huashen_bell": {
+        "name": "幽都铃", "type": "forge", "realm": 4, "seconds": _minutes(38),
+        "stone": 2250, "materials": {"幽都魂晶": 6, "天外残玉": 4, "化神丹残方": 4, "器魂": 10},
+        "output": {"kind": "equipment", "key": "幽都铃"}, "default": False,
     },
     # 残方→化神丹：打通化神丹获取链（残方此前为死材料）。需图纸（化神丹方）习得，非 NPC 直售。
     "huashen_pill": {

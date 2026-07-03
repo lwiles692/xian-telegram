@@ -213,7 +213,7 @@ def test_buy_stamina_costlier_than_best_content_yield():
 
 
 def test_yuanying_full_buff_cannot_farm_huashen_mid_hard_bosses():
-    """spec §3.2 红线：元婴圆满满 buff（推到 §6.3 合算上限）仍不得稳定刷化神中/难 Boss。
+    """spec §3.2 红线：元婴圆满新装满 buff（推到 §6.3 合算上限）仍不得稳定刷化神中/难 Boss。
 
     M2 道途 / 飞升被动调参后回归此断言，确保化神门槛未被回溯打穿。
     """
@@ -223,6 +223,50 @@ def test_yuanying_full_buff_cannot_farm_huashen_mid_hard_bosses():
         boss = MAPS[map_key]["boss"]
         wr = B.winrate(3, last, boss, profile=B.YUANYING_FULL_BUFF, n=200)
         assert wr < 0.05, f"{map_key} Boss 被元婴满 buff 刷穿：胜率 {wr:.2%}"
+
+
+def test_yuanying_treasure_gear_fills_mid_map_gap_without_entry_boss_break():
+    """#65：元婴宝阶新装应补中档体验，但不能让刚入元婴越过 Boss 门槛。"""
+    from config.maps import MAPS
+
+    legacy_run = B.map_run_winrate(3, 0, "归墟裂谷", profile=B.YUANYING_LEGACY_GEARED, n=200)
+    treasure_run = B.map_run_winrate(3, 0, "归墟裂谷", profile=B.YUANYING_TREASURE_GEARED, n=200)
+    entry_boss = B.winrate(3, 0, MAPS["归墟裂谷"]["boss"], profile=B.YUANYING_TREASURE_GEARED, n=200)
+
+    assert treasure_run >= legacy_run + 0.20
+    assert 0.75 <= treasure_run <= 0.95
+    assert entry_boss <= 0.05
+
+
+def test_yuanying_treasure_gear_does_not_turn_hard_boss_into_midgame_farm():
+    """#65：中期可挑战归墟 Boss，但天魔古原 Boss 仍是后续成长门槛。"""
+    from config.maps import MAPS
+
+    legacy_mid = B.winrate(3, 1, MAPS["归墟裂谷"]["boss"], profile=B.YUANYING_LEGACY_GEARED, n=200)
+    treasure_mid = B.winrate(3, 1, MAPS["归墟裂谷"]["boss"], profile=B.YUANYING_TREASURE_GEARED, n=200)
+    hard_mid = B.winrate(3, 1, MAPS["天魔古原"]["boss"], profile=B.YUANYING_TREASURE_GEARED, n=200)
+
+    assert legacy_mid <= 0.15
+    assert 0.65 <= treasure_mid <= 0.90
+    assert hard_mid <= 0.05
+
+
+def test_huashen_branch_gear_is_sidegrade_not_taixu_replacement():
+    """#65：化神分支偏法力/速度，太虚天门推进不得压过主线三件。"""
+    main_entry = B.dungeon_clear_fraction(4, 0, "taixu", profile=B.HUASHEN_GEARED, n=120)
+    branch_entry = B.dungeon_clear_fraction(4, 0, "taixu", profile=B.HUASHEN_BRANCH_GEARED, n=120)
+    branch_full = B.dungeon_clear_fraction(
+        4, R.num_stages(4) - 1, "taixu", profile=B.HUASHEN_BRANCH_GEARED, n=120)
+
+    assert 0.20 <= branch_entry <= main_entry - 0.15
+    assert branch_full >= 0.95
+
+
+def test_huashen_branch_world_boss_stays_in_target_range():
+    """#65：化神分支可有世界 Boss 手感，但仍受 20-80 总挑战数护栏约束。"""
+    challenges = B.world_boss_kill_challenges("huashen", 4, 2, n=120, profile=B.HUASHEN_BRANCH_GEARED)
+
+    assert 20 <= challenges <= 80
 
 
 def test_huashen_maps_keep_stone_margin_below_stamina_buy():

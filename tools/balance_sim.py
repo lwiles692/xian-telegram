@@ -29,12 +29,17 @@ from services.combat import Combatant, simulate
 GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
           "mind": "吐纳诀", "equip": ["玄铁剑", "青木甲", "聚灵佩"]}
 STARTER = {"skills": ["快剑斩", "普攻"], "mind": "吐纳诀", "equip": ["新手剑"]}
+YUANYING_LEGACY_GEARED = {**GEARED, "mind": "归元心法"}
+YUANYING_TREASURE_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
+                            "mind": "归元心法", "equip": ["天魔刃", "战魂甲", "古战佩"]}
 HUASHEN_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
                   "mind": "归元心法", "equip": ["陨星剑", "幽都甲", "太虚佩"]}
+HUASHEN_BRANCH_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
+                         "mind": "归元心法", "equip": ["星河幡", "星陨袍", "幽都铃"]}
 # 元婴圆满满 buff 上界档：现役元婴装备 + 可叠满临时/福利 buff（推到 §6.3 合算上限）。
 # 红线护栏（spec §3.2）：即便如此仍不得稳定刷化神中/难 Boss。M0 阶段不含道途。
 YUANYING_FULL_BUFF = {
-    **GEARED, "mind": "归元心法",
+    **YUANYING_TREASURE_GEARED,
     "extra_pct": {"atk": BUFFS.ATTACK_PCT_CAP, "crit": BUFFS.ATTACK_PCT_CAP,
                   "hp": BUFFS.SURVIVAL_PCT_CAP, "df": BUFFS.SURVIVAL_PCT_CAP},
 }
@@ -325,6 +330,18 @@ def report() -> None:
             print(f"  {R.realm_label(r, stage):<12} "
                   f"hp{st['hp']:>6} atk{st['atk']:>5} df{st['df']:>5} "
                   f"spd{st['spd']:>4} crit{st['crit']:>4}")
+    print("-" * 78)
+    print("Issue #65 新法宝 profile 对照")
+    for label, realm, stage, profile in (
+            ("元婴旧三件", 3, 0, YUANYING_LEGACY_GEARED),
+            ("元婴新三件", 3, 0, YUANYING_TREASURE_GEARED),
+            ("化神主线", 4, 0, HUASHEN_GEARED),
+            ("化神分支", 4, 0, HUASHEN_BRANCH_GEARED),
+    ):
+        st = build_player_stats(realm, stage, profile)
+        print(f"  {label:<8} {R.realm_label(realm, stage):<10} "
+              f"hp{st['hp']:>6} mp{st['mp']:>5} atk{st['atk']:>5} df{st['df']:>5} "
+              f"spd{st['spd']:>4} crit{st['crit']:>4}")
     print("=" * 78)
     print("地图胜率(满配):  小怪=按难度连战运行胜率, Boss=单场   [易可刷 / 中有险 / 难需成长]")
     for mkey, m in MAPS.items():
