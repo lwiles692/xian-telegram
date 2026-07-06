@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.items import ITEMS, item_name, sell_price
-from config.shop import goods_for_realm, shop_price
+from config.shop import SHOP_ITEMS, goods_for_realm, shop_price
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
                              consume_action_callback, guard_private_callback,
                              guard_private_message, section_back_markup, show)
@@ -51,7 +51,7 @@ def _half_tag(key: str, good: dict, realm: int) -> str:
 
 
 async def _sellable(user_id: int):
-    inv = await character.inventory(user_id)
+    inv = await character.inventory(user_id, bound=0)
     return [(key, qty) for key, qty in inv if sell_price(key) > 0]
 
 
@@ -61,12 +61,17 @@ def _stamina_button_text(offer: dict) -> str:
     return f"购买精力（🪙{offer['cost']} / ⚡{offer['gain']}）"
 
 
+def _clamp_qty(qty: int, lo: int, hi: int) -> int:
+    """将数量夹在合法区间内。"""
+    return max(lo, min(hi, int(qty)))
+
+
 def _back_markup() -> InlineKeyboardMarkup:
     """交易结果页的去处：回商店首页或回主菜单。"""
     return section_back_markup("↩️ 返回商店", "nav:shop")
 
 
-async def render_shop(user_id: int, now: int = None):
+async def render_shop(user_id: int, now: int | None = None):
     """商店首页：摘要 + 精力购买 + 分类入口 + 返回主菜单。"""
     char = await character.get(user_id)
     if not char:
@@ -100,7 +105,7 @@ async def render_shop(user_id: int, now: int = None):
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def render_category(user_id: int, cat: str, now: int = None):
+async def render_category(user_id: int, cat: str, now: int | None = None):
     """分类页：列出该类可购商品及价格；按钮文字自带价格。"""
     char = await character.get(user_id)
     if not char:
@@ -124,7 +129,7 @@ async def render_category(user_id: int, cat: str, now: int = None):
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _render_sell(user_id: int, now: int = None):
+async def _render_sell(user_id: int, now: int | None = None):
     sellable = await _sellable(user_id)
     if not sellable:
         return await render_shop(user_id, now=now)
@@ -139,6 +144,81 @@ async def _render_sell(user_id: int, now: int = None):
     rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
     rows.append([InlineKeyboardButton(text="↩️ 返回商店", callback_data="nav:shop")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def render_buy_editor(user_id: int, key: str, qty: int):
+    """购买数量编辑面板。"""
+    char = await character.get(user_id)
+    if not char:
+        return NEED_START, None
+    good = SHOP_ITEMS.get(key)
+    if not good or char.realm < good["realm"]:
+        return await render_category(user_id, _category_of(key))
+    unit = shop_price(key, char.realm)
+    max_qty = max(1, char.spirit_stone // unit)
+    qty = _clamp_qty(qty, 1, max_qty)
+    total = unit * qty
+    cat = _category_of(key)
+    rows = [
+        [InlineKeyboardButton(
+            text="➖ 1",
+            callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{qty - 1}")),
+         InlineKeyboardButton(
+            text="➕ 1",
+            callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{qty + 1}")),
+         InlineKeyboardButton(
+            text="最大",
+            callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{max_qty}"))],
+        [InlineKeyboardButton(
+            text=f"✅ 确认购买（{qty} 件 / {total} 灵石）",
+            callback_data=await action_callback_data(user_id, f"shop:bdo:{key}:{qty}"))],
+        [InlineKeyboardButton(text=f"↩️ 返回{_CAT_TITLE[cat]}", callback_data=f"shop:cat:{cat}")],
+    ]
+    text = "\n".join([
+        f"🪙 购买 {item_name(key)}",
+        f"单价：{unit} 灵石",
+        f"数量：{qty}",
+        f"总价：{total} 灵石（持有 {char.spirit_stone}）",
+    ])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def render_sell_editor(user_id: int, key: str, qty: int):
+    """回收数量编辑面板。"""
+    char = await character.get(user_id)
+    if not char:
+        return NEED_START, None
+    inv = dict(await character.inventory(user_id, bound=0))
+    max_qty = inv.get(key, 0)
+    if max_qty == 0:
+        return await _render_sell(user_id)
+    unit = sell_price(key)
+    if unit <= 0:
+        return await _render_sell(user_id)
+    qty = _clamp_qty(qty, 1, max_qty)
+    gain = unit * qty
+    rows = [
+        [InlineKeyboardButton(
+            text="➖ 1",
+            callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{qty - 1}")),
+         InlineKeyboardButton(
+            text="➕ 1",
+            callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{qty + 1}")),
+         InlineKeyboardButton(
+            text="最大",
+            callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{max_qty}"))],
+        [InlineKeyboardButton(
+            text=f"✅ 确认回收（{qty} 件 / {gain} 灵石）",
+            callback_data=await action_callback_data(user_id, f"shop:sdo:{key}:{qty}"))],
+        [InlineKeyboardButton(text="↩️ 返回回收", callback_data="shop:cat:sell")],
+    ]
+    text = "\n".join([
+        f"♻️ 回收 {item_name(key)}",
+        f"单价：{unit} 灵石",
+        f"数量：{qty}",
+        f"总得款：{gain} 灵石（库存 {max_qty}）",
+    ])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _result_text(res: dict) -> str:
@@ -204,8 +284,9 @@ async def cb_buy(callback: CallbackQuery):
     action = await consume_action_callback(callback)
     if not action or not action.startswith("shop:buy:"):
         return
-    res = await shop.buy(callback.from_user.id, action.split(":", 2)[2])
-    await show(callback, _result_text(res), _back_markup())
+    key = action.split(":", 2)[2]
+    text, markup = await render_buy_editor(callback.from_user.id, key, 1)
+    await show(callback, text, markup)
     await callback.answer()
 
 
@@ -216,7 +297,64 @@ async def cb_sell(callback: CallbackQuery):
     action = await consume_action_callback(callback)
     if not action or not action.startswith("shop:sell:"):
         return
-    res = await shop.sell(callback.from_user.id, action.split(":", 2)[2])
+    key = action.split(":", 2)[2]
+    text, markup = await render_sell_editor(callback.from_user.id, key, 1)
+    await show(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("shop:bqty:"))
+async def cb_shop_bqty(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("shop:bqty:"):
+        return
+    value = action.split(":", 2)[2]
+    key, qty_str = value.rsplit(":", 1)
+    text, markup = await render_buy_editor(callback.from_user.id, key, int(qty_str))
+    await show(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("shop:bdo:"))
+async def cb_shop_bdo(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("shop:bdo:"):
+        return
+    value = action.split(":", 2)[2]
+    key, qty_str = value.rsplit(":", 1)
+    res = await shop.buy(callback.from_user.id, key, int(qty_str))
+    await show(callback, _result_text(res), _back_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("shop:sqty:"))
+async def cb_shop_sqty(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("shop:sqty:"):
+        return
+    value = action.split(":", 2)[2]
+    key, qty_str = value.rsplit(":", 1)
+    text, markup = await render_sell_editor(callback.from_user.id, key, int(qty_str))
+    await show(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("shop:sdo:"))
+async def cb_shop_sdo(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("shop:sdo:"):
+        return
+    value = action.split(":", 2)[2]
+    key, qty_str = value.rsplit(":", 1)
+    res = await shop.sell(callback.from_user.id, key, int(qty_str))
     await show(callback, _result_text(res), _back_markup())
     await callback.answer()
 
