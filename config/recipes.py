@@ -105,7 +105,7 @@ RECIPES = {
     },
     # 残方→化神丹：打通化神丹获取链（残方此前为死材料）。需图纸（化神丹方）习得，非 NPC 直售。
     "huashen_pill": {
-        "name": "化神丹", "type": "alchemy", "realm": 4, "seconds": _minutes(30),
+        "name": "化神丹", "type": "alchemy", "realm": 3, "seconds": _minutes(30),
         "stone": 1500, "materials": {"化神丹残方": 6, "妖丹": 4},
         "output": {"kind": "item", "key": "化神丹", "qty": 1}, "default": False,
     },

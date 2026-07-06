@@ -10,6 +10,7 @@ import pytest_asyncio
 
 from config import ascension as ASC
 from config import realms as R
+from config import recipes as REC
 from config import shop as SHOP
 from config.items import ITEMS
 from models import db
@@ -80,12 +81,14 @@ async def test_alchemy_path_raises_real_breakthrough_rate(temp_db, monkeypatch):
 async def test_huashen_pill_recipe_converts_scraps(temp_db):
     assert "化神丹" not in SHOP.SHOP_ITEMS          # 维持反套利：不进 NPC 直售
     assert ITEMS["化神丹方"]["recipe"] == "huashen_pill"
+    assert REC.RECIPES["huashen_pill"]["realm"] == 3
 
     uid = 7003
     await character.create(uid, "danxiu")
-    await character.set_progress(uid, 4, 0, 0)
+    last_yuanying = R.num_stages(3) - 1
+    await character.set_progress(uid, 3, last_yuanying, R.advance_cost(3, last_yuanying))
     await character.add_stone(uid, 5000)
-    await character.add_item(uid, "化神丹残方", 6)
+    await character.add_item(uid, "化神丹残方", 8)
     await character.add_item(uid, "妖丹", 4)
     await character.add_item(uid, "化神丹方", 1)
 
@@ -98,7 +101,7 @@ async def test_huashen_pill_recipe_converts_scraps(temp_db):
 
     assert any(c["name"] == "化神丹" for c in collected)
     assert await character.item_qty(uid, "化神丹") == 1
-    assert await character.item_qty(uid, "化神丹残方") == 0   # 残方被消费
+    assert await character.item_qty(uid, "化神丹残方") == 2   # 8 张残方炼丹消耗 6 张
 
 
 # ---- C3：need_pill 化神丹来源指引（spec T0.8）----
