@@ -132,10 +132,13 @@ async def audit_frequent_trades(now: int = None, window_seconds: int = AUDIT_FRE
     return [dict(row) for row in rows]
 
 
-async def audit_report(limit_price: int = 1_000_000, now: int = None) -> dict:
+async def audit_report(limit_price: int = 1_000_000, now: int = None,
+                       window_seconds: int = AUDIT_FREQUENT_WINDOW_SECONDS,
+                       min_trades: int = AUDIT_FREQUENT_MIN_TRADES) -> dict:
     return {
         "high_price": await audit_suspicious(limit_price),
-        "frequent_trades": await audit_frequent_trades(now=now),
+        "frequent_trades": await audit_frequent_trades(
+            now=now, window_seconds=window_seconds, min_trades=min_trades),
     }
 
 

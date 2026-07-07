@@ -15,6 +15,17 @@ from models import db
 from services import market
 
 
+def resolve_db_arg(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    path = Path(raw).expanduser()
+    if not path.exists():
+        raise SystemExit(f"database does not exist: {path}")
+    if path.is_dir():
+        raise SystemExit(f"database path is a directory: {path}")
+    return str(path.resolve())
+
+
 async def _main():
     parser = argparse.ArgumentParser(description="Audit player market listings.")
     parser.add_argument("--db", help="SQLite database path; defaults to the app database.")
@@ -24,15 +35,13 @@ async def _main():
     parser.add_argument("--now", type=int)
     args = parser.parse_args()
 
-    await db.init_db(args.db)
+    await db.init_db(resolve_db_arg(args.db))
     try:
-        report = {
-            "high_price": await market.audit_suspicious(args.limit_price),
-            "frequent_trades": await market.audit_frequent_trades(
-                now=args.now,
-                window_seconds=args.window_seconds,
-                min_trades=args.min_trades),
-        }
+        report = await market.audit_report(
+            limit_price=args.limit_price,
+            now=args.now,
+            window_seconds=args.window_seconds,
+            min_trades=args.min_trades)
         print(json.dumps(report, ensure_ascii=False, indent=2))
     finally:
         await db.close_db()

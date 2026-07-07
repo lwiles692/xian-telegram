@@ -77,7 +77,7 @@ async def test_secondary_pages_keep_contextual_back_links_without_full_menu(temp
 
     secondary_pages = [
         ("商店分类", await shop_handler.render_category(uid, "material"), {"nav:shop"}),
-        ("坊市定价", await market_handler.render_price_editor(uid, "灵草", 100), {"market:cat:sell"}),
+        ("坊市定价", await market_handler.render_listing_editor(uid, "灵草", 100), {"market:cat:sell"}),
         ("宗门商店", await sect_handler.render_sect_shop(uid), {"nav:sect"}),
     ]
 

@@ -250,6 +250,62 @@ async def test_sect_war_defeat_still_costs_stamina_and_records_window(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_sect_war_combat_exception_does_not_cost_stamina(temp_db, monkeypatch):
+    uid = 9638
+    await character.create(uid, "fault-warrior")
+    await character.set_progress(uid, 4, 0, 0)
+    await character.add_stone(uid, 1000)
+    await sect.create(uid, "断线宗", now=1000)
+    await db.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (sect_war.CFG.WAR_STAMINA_COST + 7, WAR_OPEN, uid))
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("combat interrupted")
+
+    monkeypatch.setattr(sect_war, "simulate", boom)
+
+    with pytest.raises(RuntimeError):
+        await sect_war.capture(uid, "altar", now=WAR_OPEN)
+    row = await db.fetchone("SELECT stamina FROM characters WHERE user_id=?", (uid,))
+    window = await db.fetchone("SELECT 1 FROM activity_windows WHERE user_id=?", (uid,))
+    score = await db.fetchone(
+        "SELECT COALESCE(SUM(score), 0) AS s FROM sect_outposts WHERE outpost_key='altar'")
+
+    assert row["stamina"] == sect_war.CFG.WAR_STAMINA_COST + 7
+    assert window is None
+    assert score["s"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sect_war_new_season_resets_unsettled_outpost_score(temp_db, monkeypatch):
+    uid = 9639
+    await character.create(uid, "season-warrior")
+    await character.set_progress(uid, 4, 0, 0)
+    await character.add_stone(uid, 1000)
+    await sect.create(uid, "换季宗", now=1000)
+    member = await db.fetchone("SELECT sect_id FROM sect_members WHERE user_id=?", (uid,))
+    await db.execute(
+        "INSERT INTO sect_outposts(sect_id, outpost_key, score, season, updated_at) "
+        "VALUES(?, 'altar', 99, '1999-01', ?)",
+        (member["sect_id"], WAR_OPEN - 1000))
+
+    def fake_simulate(player, _guard, **_kwargs):
+        return {"winner": player, "a_hp": player.hp, "d_hp": 0, "rounds": 1}
+
+    monkeypatch.setattr(sect_war, "simulate", fake_simulate)
+
+    res = await sect_war.capture(uid, "altar", score=20, now=WAR_OPEN)
+    row = await db.fetchone(
+        "SELECT score, season FROM sect_outposts WHERE sect_id=? AND outpost_key='altar'",
+        (member["sect_id"],))
+
+    assert res["status"] == "ok"
+    assert row["score"] == 20
+    assert row["season"] != "1999-01"
+
+
+@pytest.mark.asyncio
 async def test_sect_can_hold_multiple_outposts(temp_db):
     uid = 9614
     await character.create(uid, "multi")

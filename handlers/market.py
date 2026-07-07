@@ -96,9 +96,26 @@ def _clamp_qty(qty: int, have: int | None = None) -> int:
     return max(MIN_LIST_QTY, min(upper, int(qty)))
 
 
-async def render_price_editor(user_id: int, key: str, price: int, qty: int = DEFAULT_LIST_QTY):
-    """兼容旧调用名；实际渲染数量 + 总价编辑器。"""
-    return await render_listing_editor(user_id, key, price, qty)
+def _listing_payload(key: str, qty: int, price: int) -> str:
+    return f"{key}:{_clamp_qty(qty)}:{_clamp_price(price)}"
+
+
+def _parse_listing_payload(op: str, value: str):
+    try:
+        if op == "qty":
+            # Compatibility with PR #67 pre-review tokens: market:qty:{key}:{price}:{qty}
+            key, price, qty = value.rsplit(":", 2)
+        else:
+            parts = value.rsplit(":", 2)
+            if len(parts) == 3:
+                key, qty, price = parts
+            else:
+                # Compatibility with old deployed tokens: market:price/confirm:{key}:{price}
+                key, price = value.rsplit(":", 1)
+                qty = DEFAULT_LIST_QTY
+        return key, _clamp_qty(int(qty)), _clamp_price(int(price))
+    except (TypeError, ValueError):
+        return None
 
 
 async def render_listing_editor(user_id: int, key: str, price: int, qty: int = DEFAULT_LIST_QTY):
@@ -117,22 +134,23 @@ async def render_listing_editor(user_id: int, key: str, price: int, qty: int = D
         [InlineKeyboardButton(
             text="➖ 100",
             callback_data=await action_callback_data(
-                user_id, f"market:price:{key}:{qty}:{price - LIST_PRICE_STEP}")),
+                user_id, f"market:edit:{_listing_payload(key, qty, price - LIST_PRICE_STEP)}")),
          InlineKeyboardButton(
             text="➕ 100",
             callback_data=await action_callback_data(
-                user_id, f"market:price:{key}:{qty}:{price + LIST_PRICE_STEP}"))],
+                user_id, f"market:edit:{_listing_payload(key, qty, price + LIST_PRICE_STEP)}"))],
         [InlineKeyboardButton(
             text="➖ 1",
             callback_data=await action_callback_data(
-                user_id, f"market:qty:{key}:{price}:{qty - LIST_QTY_STEP}")),
+                user_id, f"market:edit:{_listing_payload(key, qty - LIST_QTY_STEP, price)}")),
          InlineKeyboardButton(
             text="➕ 1",
             callback_data=await action_callback_data(
-                user_id, f"market:qty:{key}:{price}:{qty + LIST_QTY_STEP}"))],
+                user_id, f"market:edit:{_listing_payload(key, qty + LIST_QTY_STEP, price)}"))],
         [InlineKeyboardButton(
             text=f"✅ 确认上架（×{qty} / {price} 灵石）",
-            callback_data=await action_callback_data(user_id, f"market:confirm:{key}:{qty}:{price}"))],
+            callback_data=await action_callback_data(
+                user_id, f"market:confirm:{_listing_payload(key, qty, price)}"))],
         [InlineKeyboardButton(
             text="↩️ 返回上架",
             callback_data="market:cat:sell")],
@@ -204,27 +222,31 @@ async def cb_market_action(callback: CallbackQuery):
     parts = action.split(":", 2)
     op, value = parts[1], parts[2]
     uid = callback.from_user.id
-    # 上架走定价编辑器：list=打开（默认 100），price=调价重绘，confirm=真正上架。
+    # 上架走编辑器：list=打开，edit=调数量/总价重绘；price/qty 为旧 token 兼容。
     if op == "list":
-        text, markup = await render_price_editor(uid, value, DEFAULT_LIST_PRICE, DEFAULT_LIST_QTY)
+        text, markup = await render_listing_editor(uid, value, DEFAULT_LIST_PRICE, DEFAULT_LIST_QTY)
         await show(callback, text, markup)
         await callback.answer()
         return
-    if op == "price":
-        key, qty, price = value.rsplit(":", 2)
-        text, markup = await render_price_editor(uid, key, int(price), int(qty))
-        await show(callback, text, markup)
-        await callback.answer()
-        return
-    if op == "qty":
-        key, price, qty = value.rsplit(":", 2)
-        text, markup = await render_price_editor(uid, key, int(price), int(qty))
+    if op in {"edit", "price", "qty"}:
+        parsed = _parse_listing_payload(op, value)
+        if not parsed:
+            await show(callback, "上架参数不合规，请返回坊市重新操作。",
+                       section_back_markup("↩️ 返回坊市", "nav:market"))
+            await callback.answer()
+            return
+        key, qty, price = parsed
+        text, markup = await render_listing_editor(uid, key, price, qty)
         await show(callback, text, markup)
         await callback.answer()
         return
     if op == "confirm":
-        key, qty, price = value.rsplit(":", 2)
-        res = await market.create_listing(uid, key, _clamp_qty(int(qty)), _clamp_price(int(price)))
+        parsed = _parse_listing_payload(op, value)
+        if not parsed:
+            res = {"status": "bad_request"}
+        else:
+            key, qty, price = parsed
+            res = await market.create_listing(uid, key, qty, price)
     elif op == "buy":
         res = await market.buy(uid, int(value))
     else:
