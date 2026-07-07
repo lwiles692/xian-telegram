@@ -5,8 +5,8 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from config.items import ITEMS, equipment_slot, item_name
 from config.equipment import QIHUN_KEY
+from config.items import ITEMS, equipment_slot, format_bonus, item_name
 from config.skills import MIND_SLOT, skill_name
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
                              button_grid, consume_action_callback,
@@ -23,8 +23,7 @@ SKILL_CATEGORIES = {
 
 
 def _bonus_text(inst: dict) -> str:
-    bonus = character.equipment_bonus(inst)
-    return "、".join(f"{k}+{v}" for k, v in bonus.items()) or "无词条"
+    return format_bonus(character.enhanced_equipment_bonus(inst))
 
 
 def _learnable_pages(inv: list[tuple[str, int]]) -> list[tuple[str, int, dict]]:
@@ -107,6 +106,10 @@ async def render_skills_category(user_id: int, cat: str):
                     ops.append(InlineKeyboardButton(
                         text=f"分解#{inst['id']}",
                         callback_data=await action_callback_data(user_id, f"eq:decompose:{inst['id']}")))
+                else:
+                    ops.append(InlineKeyboardButton(
+                        text=f"卸下#{inst['id']}",
+                        callback_data=await action_callback_data(user_id, f"eq:unequip:{inst['id']}")))
                 rows.append(ops)
     elif cat == "pages":
         page_buttons = []
@@ -167,11 +170,13 @@ async def cb_skills_category(callback: CallbackQuery):
 
 def _eq_text(res: dict) -> str:
     s = res["status"]
+    if s == "ok" and "unequipped" in res:
+        return f"已卸下 {res['name']}。"
     if s == "ok" and "level" in res:
         c = res["cost"]
         return f"{res['name']} 强化至 +{res['level']}（耗灵石 {c['stone']}、器魂 {c.get(QIHUN_KEY, 0)}）。"
     if s == "ok" and "affixes" in res:
-        aff = "、".join(f"{k}+{v}" for k, v in res["affixes"].items()) or "无词条"
+        aff = format_bonus(res["affixes"])
         c = res["cost"]
         return f"{res['name']} 重铸成功（耗灵石 {c['stone']}、器魂 {c.get(QIHUN_KEY, 0)}）。新词条：{aff}"
     if s == "ok" and "qihun" in res:
@@ -186,6 +191,8 @@ def _eq_text(res: dict) -> str:
         return f"{res['item']} 不足（需 {res['need']}，余 {res['have']}）。"
     if s == "not_equipment":
         return "此物不可如此炼制。"
+    if s == "not_equipped":
+        return "该法宝未装备，无需卸下。"
     if s == "not_found":
         return "未寻得此法宝。"
     return "炼制未成。"
@@ -215,6 +222,11 @@ async def cb_reforge(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("eq:decompose:"))
 async def cb_decompose(callback: CallbackQuery):
     await _eq_op(callback, "eq:decompose:", equipment.decompose)
+
+
+@router.callback_query(F.data.startswith("eq:unequip:"))
+async def cb_unequip(callback: CallbackQuery):
+    await _eq_op(callback, "eq:unequip:", equipment.unequip)
 
 
 @router.callback_query(F.data.startswith("equip:"))

@@ -114,7 +114,8 @@ def _result_text(res: dict) -> str:
     if s == "no_stone":
         return f"灵石不足（需 {res['need']}，余 {res['have']}）。"
     if s == "no_material":
-        return f"材料不足：{item_name(res['item'])} 需 {res['need']}，现有 {res['have']}。"
+        parts = [f"{item_name(m['item'])}：需 {m['need']}，现有 {m['have']}" for m in res["missing"]]
+        return "材料不足：\n" + "\n".join(parts)
     if s == "accelerated":
         names = "、".join(c["name"] for c in res["collected"]) or "炉火已催至将成"
         if res.get("cost", 0) <= 0:

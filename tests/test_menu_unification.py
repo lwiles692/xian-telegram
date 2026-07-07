@@ -125,10 +125,10 @@ async def test_dense_feature_home_pages_link_to_categories_before_actions(temp_d
     _text, market_home = await market_handler.render_market(uid)
     market_home_datas = _datas(market_home)
     assert {"market:cat:buy", "market:cat:sell"} <= set(market_home_datas)
-    assert not any(data.startswith(("market:buy:", "market:list:", "market:cancel:"))
+    assert not any(data.startswith(("market:buy:", "market:buy_edit:", "market:list:", "market:cancel:"))
                    for data in market_home_datas)
     _text, market_buy = await market_handler.render_market_category(uid, "buy")
-    assert any(data.startswith("market:buy:") for data in _datas(market_buy))
+    assert any(data.startswith("market:buy_edit:") for data in _datas(market_buy))
     _text, market_sell = await market_handler.render_market_category(uid, "sell")
     assert any(data.startswith("market:list:") for data in _datas(market_sell))
 

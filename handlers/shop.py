@@ -161,14 +161,17 @@ async def render_buy_editor(user_id: int, key: str, qty: int):
     cat = _category_of(key)
     rows = [
         [InlineKeyboardButton(
+            text="➖ 5",
+            callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{qty - 5}")),
+         InlineKeyboardButton(
             text="➖ 1",
             callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{qty - 1}")),
          InlineKeyboardButton(
             text="➕ 1",
             callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{qty + 1}")),
          InlineKeyboardButton(
-            text="最大",
-            callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{max_qty}"))],
+            text="➕ 5",
+            callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{qty + 5}"))],
         [InlineKeyboardButton(
             text=f"✅ 确认购买（{qty} 件 / {total} 灵石）",
             callback_data=await action_callback_data(user_id, f"shop:bdo:{key}:{qty}"))],
@@ -199,14 +202,17 @@ async def render_sell_editor(user_id: int, key: str, qty: int):
     gain = unit * qty
     rows = [
         [InlineKeyboardButton(
+            text="➖ 5",
+            callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{qty - 5}")),
+         InlineKeyboardButton(
             text="➖ 1",
             callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{qty - 1}")),
          InlineKeyboardButton(
             text="➕ 1",
             callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{qty + 1}")),
          InlineKeyboardButton(
-            text="最大",
-            callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{max_qty}"))],
+            text="➕ 5",
+            callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{qty + 5}"))],
         [InlineKeyboardButton(
             text=f"✅ 确认回收（{qty} 件 / {gain} 灵石）",
             callback_data=await action_callback_data(user_id, f"shop:sdo:{key}:{qty}"))],

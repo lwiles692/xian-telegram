@@ -119,6 +119,40 @@ def sell_price(key: str) -> int:
     return int(ITEMS.get(key, {}).get("sell", 0))
 
 
+# 法宝/装备增益 stat key → 中文标签映射（#35）
+STAT_LABEL = {
+    "atk": "攻击",
+    "mp": "法力",
+    "crit": "暴击",
+    "hp": "气血",
+    "df": "防御",
+    "spd": "速度",
+    "atk_pct": "攻击加成",
+    "hp_pct": "气血加成",
+    "df_pct": "防御加成",
+    "lifesteal_pct": "吸血",
+    "reflect_pct": "反伤",
+    "initiative": "先手",
+    "crit_resist": "抗暴",
+    "pierce": "穿透",
+}
+
+
+def format_bonus(bonus: dict) -> str:
+    """将 bonus dict 格式化为中文显示文本，如「攻击+340、法力+160、暴击率+30」。
+
+    _pct 后缀的值以百分比显示（0.12 → +12%），其余直接显示数值。
+    """
+    parts = []
+    for k, v in bonus.items():
+        label = STAT_LABEL.get(k, k)
+        if k.endswith("_pct"):
+            parts.append(f"{label}+{v * 100:.0f}%")
+        else:
+            parts.append(f"{label}+{v}")
+    return "、".join(parts) if parts else "无词条"
+
+
 def is_usable(key: str) -> bool:
     item = ITEMS.get(key, {})
     return (

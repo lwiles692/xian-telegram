@@ -400,8 +400,7 @@ async def write_vitals(user_id: int, hp: int, mp: int, now: int, conn=None):
 
 def _apply_equipment_bonus(base: dict, pct_bonus: dict, bonus: dict, enhance_level: int = 0):
     # 强化只放大装备的「平加属性」（hp/atk/df/...），不放大百分比词条与战斗修正。
-    mult = 1.0 + max(0, enhance_level) * ENHANCE_PER_LEVEL
-    for key, val in bonus.items():
+    for key, val in _enhanced_bonus_values(bonus, enhance_level).items():
         if key in COMBAT_MOD_KEYS:
             continue
         if key.endswith("_pct"):
@@ -409,7 +408,7 @@ def _apply_equipment_bonus(base: dict, pct_bonus: dict, bonus: dict, enhance_lev
             if stat_key in pct_bonus:
                 pct_bonus[stat_key] += float(val)
         else:
-            base[key] = base.get(key, 0) + int(round(val * mult))
+            base[key] = base.get(key, 0) + int(val)
 
 
 def _collect_temporary_stat_buffs(base: dict, pct_bonus: dict, state: dict):
@@ -451,6 +450,24 @@ def equipment_bonus(inst: dict) -> dict:
     for key, val in affixes.items():
         bonus[key] = bonus.get(key, 0) + val
     return bonus
+
+
+def _enhanced_bonus_values(bonus: dict, enhance_level: int = 0) -> dict:
+    scaled = dict(bonus)
+    lvl = int(enhance_level or 0)
+    if lvl <= 0:
+        return scaled
+    mult = 1.0 + lvl * ENHANCE_PER_LEVEL
+    for key, val in list(scaled.items()):
+        if key in COMBAT_MOD_KEYS or key.endswith("_pct"):
+            continue
+        scaled[key] = int(round(val * mult))
+    return scaled
+
+
+def enhanced_equipment_bonus(inst: dict) -> dict:
+    """返回强化后用于展示和属性结算的法宝增益。"""
+    return _enhanced_bonus_values(equipment_bonus(inst), inst.get("enhance_level", 0))
 
 
 async def combat_mods(user_id: int) -> dict:

@@ -52,6 +52,22 @@ async def test_enhance_raises_stats_costs_rise_and_caps(temp_db):
     assert res["status"] == "max" and res["level"] == EQ.ENHANCE_MAX_LEVEL
 
 
+def test_enhanced_equipment_bonus_scales_flat_stats_only():
+    """强化后显示增益只放大平加属性，不放大百分比词条与战斗修正。"""
+    inst = {
+        "base_key": "玄铁剑",
+        "enhance_level": 2,
+        "affixes": {"atk": 10, "atk_pct": 0.05, "pierce": 3},
+    }
+
+    bonus = character.enhanced_equipment_bonus(inst)
+
+    assert bonus["atk"] == int(round((38 + 10) * (1 + 2 * EQ.ENHANCE_PER_LEVEL)))
+    assert bonus["crit"] == int(round(4 * (1 + 2 * EQ.ENHANCE_PER_LEVEL)))
+    assert bonus["atk_pct"] == 0.05
+    assert bonus["pierce"] == 3
+
+
 @pytest.mark.asyncio
 async def test_enhance_requires_qihun(temp_db):
     uid = 6002

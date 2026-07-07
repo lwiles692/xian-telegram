@@ -18,6 +18,14 @@ AUDIT_FREQUENT_WINDOW_SECONDS = 24 * 3600
 AUDIT_FREQUENT_MIN_TRADES = 3
 
 
+async def get_listing(listing_id: int) -> dict | None:
+    """Fetch a single listing by ID."""
+    row = await db.fetchone("SELECT * FROM market_listings WHERE id=?", (listing_id,))
+    if row:
+        return _format(row)
+    return None
+
+
 async def list_active(limit: int = 20) -> list[dict]:
     rows = await db.fetchall(
         "SELECT * FROM market_listings WHERE status='active' ORDER BY created_at LIMIT ?",
@@ -108,6 +116,58 @@ async def cancel(seller_id: int, listing_id: int, now: int = None) -> dict:
             "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty=qty+?",
             (seller_id, listing["item_key"], listing["qty"], listing["qty"]))
         return {"status": "ok", "item": item_name(listing["item_key"]), "qty": listing["qty"]}
+
+
+async def buy_partial(buyer_id: int, listing_id: int, qty: int, now: int = None) -> dict:
+    """购买一个挂单的部分或全部数量。qty >= listing.qty 等同于全量购买。"""
+    now = int(time.time()) if now is None else now
+    qty = int(qty)
+    if qty <= 0:
+        return {"status": "bad_request"}
+    async with db.transaction() as conn:
+        cur = await conn.execute("SELECT * FROM market_listings WHERE id=?", (listing_id,))
+        listing = await cur.fetchone()
+        await cur.close()
+        if not listing or listing["status"] != "active":
+            return {"status": "not_available"}
+        if listing["seller_id"] == buyer_id:
+            return {"status": "self_buy"}
+        if qty > listing["qty"]:
+            return {"status": "bad_request", "available": listing["qty"]}
+        cur = await conn.execute("SELECT spirit_stone FROM characters WHERE user_id=?", (buyer_id,))
+        buyer = await cur.fetchone()
+        await cur.close()
+        if not buyer:
+            return {"status": "missing"}
+        buy_price = int(listing["price"] * qty / listing["qty"] + 0.5)
+        if buyer["spirit_stone"] < buy_price:
+            return {"status": "no_stone", "need": buy_price, "have": buyer["spirit_stone"]}
+        tax = int(buy_price * MARKET_TAX_RATE)
+        seller_gain = buy_price - tax
+        await conn.execute(
+            "UPDATE characters SET spirit_stone=spirit_stone-? WHERE user_id=?",
+            (buy_price, buyer_id))
+        await conn.execute(
+            "UPDATE characters SET spirit_stone=spirit_stone+? WHERE user_id=?",
+            (seller_gain, listing["seller_id"]))
+        await conn.execute(
+            "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
+            "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty=qty+?",
+            (buyer_id, listing["item_key"], qty, qty))
+        if qty >= listing["qty"]:
+            await conn.execute(
+                "UPDATE market_listings SET status='sold', buyer_id=?, updated_at=? "
+                "WHERE id=? AND status='active'",
+                (buyer_id, now, listing_id))
+        else:
+            remaining_qty = listing["qty"] - qty
+            remaining_price = listing["price"] - buy_price
+            await conn.execute(
+                "UPDATE market_listings SET qty=?, price=?, updated_at=? "
+                "WHERE id=? AND status='active'",
+                (remaining_qty, remaining_price, now, listing_id))
+        return {"status": "ok", "item": item_name(listing["item_key"]), "qty": qty,
+                "price": buy_price, "tax": tax, "seller_gain": seller_gain}
 
 
 async def audit_suspicious(limit_price: int = 1_000_000) -> list[dict]:
