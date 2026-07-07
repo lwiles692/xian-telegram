@@ -63,6 +63,37 @@ async def test_second_path_requires_switch_flow_placeholder(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_path_menu_switches_to_new_path_after_first_choice(temp_db):
+    from handlers import dao_path as path_handler
+
+    uid = 9312
+    await character.create(uid, "path-ui")
+    await character.set_progress(uid, 3, 0, 0)
+
+    _text, first_markup = await path_handler.render_path(uid)
+    first_buttons = [
+        (button.text, button.callback_data)
+        for row in first_markup.inline_keyboard
+        for button in row
+    ]
+
+    assert any(text == "选择 体修" and data.startswith("path:unlock:body:")
+               for text, data in first_buttons)
+
+    await dao_path.unlock(uid, "sword", now=1000)
+    _text, switch_markup = await path_handler.render_path(uid)
+    switch_buttons = [
+        (button.text, button.callback_data)
+        for row in switch_markup.inline_keyboard
+        for button in row
+    ]
+
+    assert any(text == "转修 体修" and data.startswith("path:switch:body:")
+               for text, data in switch_buttons)
+    assert not any(text == "选择 体修" for text, _data in switch_buttons)
+
+
+@pytest.mark.asyncio
 async def test_active_path_bonuses_feed_stats_and_clamp(temp_db):
     uid = 9304
     await character.create(uid, "bonus")

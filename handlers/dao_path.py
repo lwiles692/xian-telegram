@@ -49,13 +49,16 @@ async def render_path(user_id: int):
     else:
         unlocked = set()
         lines.append(f"元婴初期起可择一道途，首条免费。当前需至 {CFG.UNLOCK_REALM} 阶境界。")
+    has_path = bool(paths)
     for key, cfg in CFG.DAO_PATHS.items():
         if key in unlocked:
             continue
         lines.append(f"{cfg['name']}：{cfg['role']}")
+        op = "switch" if has_path else "unlock"
+        label = "转修" if has_path else "选择"
         buttons.append(InlineKeyboardButton(
-            text=f"选择 {cfg['name']}",
-            callback_data=await action_callback_data(user_id, f"path:unlock:{key}")))
+            text=f"{label} {cfg['name']}",
+            callback_data=await action_callback_data(user_id, f"path:{op}:{key}")))
     rows = button_grid(buttons)
     append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
