@@ -156,6 +156,156 @@ async def test_sect_war_closed_outside_window(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_sect_war_rejects_no_stamina_before_combat_and_records_window(temp_db):
+    uid = 9634
+    await character.create(uid, "tired-warrior")
+    await character.set_progress(uid, 4, 0, 0)
+    await character.add_stone(uid, 1000)
+    await sect.create(uid, "疲兵宗", now=1000)
+    await db.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (0, WAR_OPEN - (sect_war.CFG.WAR_STAMINA_COST - 1) * settle.STAMINA_REGEN_SECONDS, uid))
+
+    res = await sect_war.capture(uid, "altar", now=WAR_OPEN)
+    row = await db.fetchone("SELECT stamina, stamina_at FROM characters WHERE user_id=?", (uid,))
+    window = await db.fetchone(
+        "SELECT kind, source_key, start_at, finish_at FROM activity_windows WHERE user_id=?",
+        (uid,))
+    score = await db.fetchone(
+        "SELECT COALESCE(SUM(score), 0) AS s FROM sect_outposts WHERE outpost_key='altar'")
+
+    assert res["status"] == "no_stamina"
+    assert res["have"] == sect_war.CFG.WAR_STAMINA_COST - 1
+    assert row["stamina"] == sect_war.CFG.WAR_STAMINA_COST - 1
+    assert window["kind"] == "sect_war"
+    assert window["source_key"] == "altar"
+    assert window["finish_at"] - window["start_at"] == sect_war.CFG.WAR_NO_STAMINA_WINDOW_SECONDS
+    assert score["s"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sect_war_settles_stamina_regen_before_cost(temp_db):
+    uid = 9635
+    await character.create(uid, "rested-warrior")
+    await character.set_progress(uid, 4, 0, 0)
+    await character.add_stone(uid, 1000)
+    await sect.create(uid, "回气宗", now=1000)
+    await db.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (0, WAR_OPEN - sect_war.CFG.WAR_STAMINA_COST * settle.STAMINA_REGEN_SECONDS, uid))
+
+    res = await sect_war.capture(uid, "altar", now=WAR_OPEN)
+    row = await db.fetchone("SELECT stamina, stamina_at FROM characters WHERE user_id=?", (uid,))
+
+    assert res["status"] == "ok"
+    assert row["stamina"] == 0
+    assert row["stamina_at"] == WAR_OPEN
+
+
+@pytest.mark.asyncio
+async def test_sect_war_success_costs_stamina_and_records_activity_window(temp_db):
+    uid = 9636
+    await character.create(uid, "window-warrior")
+    await character.set_progress(uid, 4, 0, 0)
+    await character.add_stone(uid, 1000)
+    await sect.create(uid, "行军宗", now=1000)
+    await db.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (sect_war.CFG.WAR_STAMINA_COST + 5, WAR_OPEN, uid))
+
+    res = await sect_war.capture(uid, "altar", now=WAR_OPEN)
+    row = await db.fetchone("SELECT stamina FROM characters WHERE user_id=?", (uid,))
+    window = await db.fetchone(
+        "SELECT kind, source_key, start_at, finish_at FROM activity_windows WHERE user_id=?",
+        (uid,))
+
+    assert res["status"] == "ok"
+    assert row["stamina"] == 5
+    assert window["kind"] == "sect_war"
+    assert window["source_key"] == "altar"
+    assert window["finish_at"] - window["start_at"] == sect_war.CFG.WAR_ACTION_DURATION_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_sect_war_defeat_still_costs_stamina_and_records_window(temp_db):
+    uid = 9637
+    await character.create(uid, "failed-warrior")
+    await character.set_progress(uid, 1, 0, 0)
+    await character.add_stone(uid, 1000)
+    await sect.create(uid, "败战宗", now=1000)
+    await db.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (sect_war.CFG.WAR_STAMINA_COST + 3, WAR_OPEN, uid))
+
+    res = await sect_war.capture(uid, "altar", now=WAR_OPEN)
+    row = await db.fetchone("SELECT stamina FROM characters WHERE user_id=?", (uid,))
+    window = await db.fetchone(
+        "SELECT kind, source_key FROM activity_windows WHERE user_id=?",
+        (uid,))
+
+    assert res["status"] == "defeated"
+    assert row["stamina"] == 3
+    assert window["kind"] == "sect_war"
+    assert window["source_key"] == "altar"
+
+
+@pytest.mark.asyncio
+async def test_sect_war_combat_exception_does_not_cost_stamina(temp_db, monkeypatch):
+    uid = 9638
+    await character.create(uid, "fault-warrior")
+    await character.set_progress(uid, 4, 0, 0)
+    await character.add_stone(uid, 1000)
+    await sect.create(uid, "断线宗", now=1000)
+    await db.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (sect_war.CFG.WAR_STAMINA_COST + 7, WAR_OPEN, uid))
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("combat interrupted")
+
+    monkeypatch.setattr(sect_war, "simulate", boom)
+
+    with pytest.raises(RuntimeError):
+        await sect_war.capture(uid, "altar", now=WAR_OPEN)
+    row = await db.fetchone("SELECT stamina FROM characters WHERE user_id=?", (uid,))
+    window = await db.fetchone("SELECT 1 FROM activity_windows WHERE user_id=?", (uid,))
+    score = await db.fetchone(
+        "SELECT COALESCE(SUM(score), 0) AS s FROM sect_outposts WHERE outpost_key='altar'")
+
+    assert row["stamina"] == sect_war.CFG.WAR_STAMINA_COST + 7
+    assert window is None
+    assert score["s"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sect_war_new_season_resets_unsettled_outpost_score(temp_db, monkeypatch):
+    uid = 9639
+    await character.create(uid, "season-warrior")
+    await character.set_progress(uid, 4, 0, 0)
+    await character.add_stone(uid, 1000)
+    await sect.create(uid, "换季宗", now=1000)
+    member = await db.fetchone("SELECT sect_id FROM sect_members WHERE user_id=?", (uid,))
+    await db.execute(
+        "INSERT INTO sect_outposts(sect_id, outpost_key, score, season, updated_at) "
+        "VALUES(?, 'altar', 99, '1999-01', ?)",
+        (member["sect_id"], WAR_OPEN - 1000))
+
+    def fake_simulate(player, _guard, **_kwargs):
+        return {"winner": player, "a_hp": player.hp, "d_hp": 0, "rounds": 1}
+
+    monkeypatch.setattr(sect_war, "simulate", fake_simulate)
+
+    res = await sect_war.capture(uid, "altar", score=20, now=WAR_OPEN)
+    row = await db.fetchone(
+        "SELECT score, season FROM sect_outposts WHERE sect_id=? AND outpost_key='altar'",
+        (member["sect_id"],))
+
+    assert res["status"] == "ok"
+    assert row["score"] == 20
+    assert row["season"] != "1999-01"
+
+
+@pytest.mark.asyncio
 async def test_sect_can_hold_multiple_outposts(temp_db):
     uid = 9614
     await character.create(uid, "multi")
@@ -247,6 +397,34 @@ async def test_activity_shop_exchanges_material_for_baoming(temp_db):
     assert res["status"] == "ok" and res["item"] == "保命符"
     assert await character.item_qty(uid, "保命符", bound=1) == 1
     assert await character.item_qty(uid, "天魔令") == 3  # 扣 2
+
+
+def test_activity_shop_offer_config_covers_first_reward_set():
+    """#48：首批活动商店覆盖保命符、转修令、道途材料和飞升点兑换。"""
+    from config.items import ITEMS
+
+    assert W.SHOP_OFFERS["baoming"]["reward_item"] == "保命符"
+    assert W.SHOP_OFFERS["switch_token"]["reward_item"] == "转修令"
+    assert W.SHOP_OFFERS["path_material"]["reward_item"] == "天外残玉"
+    assert W.SHOP_OFFERS["ascension"]["reward_kind"] == "ascension"
+    for offer in W.SHOP_OFFERS.values():
+        assert offer["material_cost"] > 0
+        assert offer["reward_qty"] > 0
+        if offer["reward_kind"] == "item":
+            assert offer["reward_item"] in ITEMS
+
+
+@pytest.mark.asyncio
+async def test_activity_shop_exchanges_material_for_bound_switch_token(temp_db):
+    uid = 9633
+    await character.create(uid, "switch-shop")
+    await character.add_item(uid, "剑冢铁", 4, bound=1)
+
+    res = await weekly_events.exchange(uid, "switch_token", now=1000)
+
+    assert res["status"] == "ok" and res["item"] == "转修令"
+    assert await character.item_qty(uid, "转修令", bound=1) == 1
+    assert await character.item_qty(uid, "转修令", bound=0) == 0
 
 
 @pytest.mark.asyncio

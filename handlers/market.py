@@ -14,9 +14,13 @@ from services import character, market
 
 router = Router()
 DEFAULT_LIST_PRICE = 100
+DEFAULT_LIST_QTY = 1
 LIST_PRICE_STEP = 100
+LIST_QTY_STEP = 1
 MIN_LIST_PRICE = 100
 MAX_LIST_PRICE = 10_000_000
+MIN_LIST_QTY = 1
+MAX_LIST_QTY = 999
 MARKET_CATEGORIES = {
     "buy": "浏览挂单",
     "sell": "上架物品",
@@ -69,7 +73,7 @@ async def render_market_category(user_id: int, cat: str):
         else:
             lines.append("暂无挂单。")
     else:
-        lines.append("—— 上架（点物品后可 +/-100 调价，绑定物不可上架）——")
+        lines.append("—— 上架（点物品后可调整数量和总价，绑定物不可上架）——")
         if inv:
             for key, qty in inv[:8]:
                 lines.append(f"{item_name(key)} ×{qty}")
@@ -87,25 +91,66 @@ def _clamp_price(price: int) -> int:
     return max(MIN_LIST_PRICE, min(MAX_LIST_PRICE, int(price)))
 
 
-async def render_price_editor(user_id: int, key: str, price: int):
-    """定价视图：默认 100，可反复 +/-100 后确认上架。"""
+def _clamp_qty(qty: int, have: int | None = None) -> int:
+    upper = MAX_LIST_QTY if have is None else max(MIN_LIST_QTY, min(MAX_LIST_QTY, int(have)))
+    return max(MIN_LIST_QTY, min(upper, int(qty)))
+
+
+def _listing_payload(key: str, qty: int, price: int) -> str:
+    return f"{key}:{_clamp_qty(qty)}:{_clamp_price(price)}"
+
+
+def _parse_listing_payload(op: str, value: str):
+    try:
+        if op == "qty":
+            # Compatibility with PR #67 pre-review tokens: market:qty:{key}:{price}:{qty}
+            key, price, qty = value.rsplit(":", 2)
+        else:
+            parts = value.rsplit(":", 2)
+            if len(parts) == 3:
+                key, qty, price = parts
+            else:
+                # Compatibility with old deployed tokens: market:price/confirm:{key}:{price}
+                key, price = value.rsplit(":", 1)
+                qty = DEFAULT_LIST_QTY
+        return key, _clamp_qty(int(qty)), _clamp_price(int(price))
+    except (TypeError, ValueError):
+        return None
+
+
+async def render_listing_editor(user_id: int, key: str, price: int, qty: int = DEFAULT_LIST_QTY):
+    """上架编辑视图：默认 1 个 / 100 灵石，可调整数量和总价后确认。"""
     price = _clamp_price(price)
+    have = await character.item_qty(user_id, key, bound=0)
+    qty = _clamp_qty(qty, have) if have > 0 else DEFAULT_LIST_QTY
     tax = int(price * market.MARKET_TAX_RATE)
     lines = [
-        f"🏷️ 上架 {item_name(key)} ×1",
-        f"单价：{price} 灵石",
+        f"🏷️ 上架 {item_name(key)} ×{qty}",
+        f"非绑定库存：{have}",
+        f"总价：{price} 灵石",
         f"成交税 {int(market.MARKET_TAX_RATE * 100)}%，卖出实得 {price - tax} 灵石",
     ]
     rows = [
         [InlineKeyboardButton(
             text="➖ 100",
-            callback_data=await action_callback_data(user_id, f"market:price:{key}:{price - LIST_PRICE_STEP}")),
+            callback_data=await action_callback_data(
+                user_id, f"market:edit:{_listing_payload(key, qty, price - LIST_PRICE_STEP)}")),
          InlineKeyboardButton(
             text="➕ 100",
-            callback_data=await action_callback_data(user_id, f"market:price:{key}:{price + LIST_PRICE_STEP}"))],
+            callback_data=await action_callback_data(
+                user_id, f"market:edit:{_listing_payload(key, qty, price + LIST_PRICE_STEP)}"))],
         [InlineKeyboardButton(
-            text=f"✅ 确认上架（{price} 灵石）",
-            callback_data=await action_callback_data(user_id, f"market:confirm:{key}:{price}"))],
+            text="➖ 1",
+            callback_data=await action_callback_data(
+                user_id, f"market:edit:{_listing_payload(key, qty - LIST_QTY_STEP, price)}")),
+         InlineKeyboardButton(
+            text="➕ 1",
+            callback_data=await action_callback_data(
+                user_id, f"market:edit:{_listing_payload(key, qty + LIST_QTY_STEP, price)}"))],
+        [InlineKeyboardButton(
+            text=f"✅ 确认上架（×{qty} / {price} 灵石）",
+            callback_data=await action_callback_data(
+                user_id, f"market:confirm:{_listing_payload(key, qty, price)}"))],
         [InlineKeyboardButton(
             text="↩️ 返回上架",
             callback_data="market:cat:sell")],
@@ -177,21 +222,31 @@ async def cb_market_action(callback: CallbackQuery):
     parts = action.split(":", 2)
     op, value = parts[1], parts[2]
     uid = callback.from_user.id
-    # 上架走定价编辑器：list=打开（默认 100），price=调价重绘，confirm=真正上架。
+    # 上架走编辑器：list=打开，edit=调数量/总价重绘；price/qty 为旧 token 兼容。
     if op == "list":
-        text, markup = await render_price_editor(uid, value, DEFAULT_LIST_PRICE)
+        text, markup = await render_listing_editor(uid, value, DEFAULT_LIST_PRICE, DEFAULT_LIST_QTY)
         await show(callback, text, markup)
         await callback.answer()
         return
-    if op == "price":
-        key, price = value.rsplit(":", 1)
-        text, markup = await render_price_editor(uid, key, int(price))
+    if op in {"edit", "price", "qty"}:
+        parsed = _parse_listing_payload(op, value)
+        if not parsed:
+            await show(callback, "上架参数不合规，请返回坊市重新操作。",
+                       section_back_markup("↩️ 返回坊市", "nav:market"))
+            await callback.answer()
+            return
+        key, qty, price = parsed
+        text, markup = await render_listing_editor(uid, key, price, qty)
         await show(callback, text, markup)
         await callback.answer()
         return
     if op == "confirm":
-        key, price = value.rsplit(":", 1)
-        res = await market.create_listing(uid, key, 1, _clamp_price(int(price)))
+        parsed = _parse_listing_payload(op, value)
+        if not parsed:
+            res = {"status": "bad_request"}
+        else:
+            key, qty, price = parsed
+            res = await market.create_listing(uid, key, qty, price)
     elif op == "buy":
         res = await market.buy(uid, int(value))
     else:

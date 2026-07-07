@@ -50,8 +50,12 @@ def _result_text(res: dict) -> str:
         return "据点战未开放（每周六 20:00–21:00）。"
     if s == "not_member":
         return "尚未加入宗门，不可参与宗门战。"
+    if s == "no_stamina":
+        return f"精力不足（需 {res['need']}，现有 {res['have']}），未进入据点战。"
     if s == "bad_outpost":
         return "无此据点。"
+    if s == "missing":
+        return NEED_START
     return "宗门战未成。"
 
 

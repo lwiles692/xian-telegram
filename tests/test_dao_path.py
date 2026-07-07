@@ -4,7 +4,7 @@ import pytest_asyncio
 from config import dao_paths as CFG
 from config import buffs as BUFFS
 from models import db
-from services import character, dao_path
+from services import ascension, character, dao_path
 
 
 @pytest_asyncio.fixture
@@ -136,6 +136,36 @@ async def test_rank_up_requires_material_for_higher_rank(temp_db):
     assert res["status"] == "ok"
     assert (await dao_path.active_path(uid))["rank"] == 2
     assert await character.item_qty(uid, "星陨砂") == 0
+
+
+@pytest.mark.asyncio
+async def test_master_rank_consumes_ascension_point_after_material_check(temp_db):
+    uid = 9311
+    await character.create(uid, "master")
+    await character.set_progress(uid, 4, 3, 0)
+    await dao_path.unlock(uid, "sword", now=1000)
+    await db.execute("UPDATE dao_paths SET rank=3 WHERE user_id=? AND path_key='sword'", (uid,))
+    await db.execute("UPDATE characters SET daohang=? WHERE user_id=?", (2000, uid))
+    await character.add_item(uid, "天外残玉", 1, bound=1)
+
+    short = await dao_path.rank_up(uid, "sword", now=1100)
+    before = await db.fetchone("SELECT daohang FROM characters WHERE user_id=?", (uid,))
+
+    assert short["status"] == "no_ascension_points"
+    assert before["daohang"] == 2000
+    assert await character.item_qty(uid, "天外残玉") == 1
+
+    async with db.transaction() as conn:
+        await ascension.add_points_conn(conn, uid, 1, now=1110)
+    res = await dao_path.rank_up(uid, "sword", now=1200)
+    after = await db.fetchone("SELECT daohang FROM characters WHERE user_id=?", (uid,))
+    state = await ascension.get(uid)
+
+    assert res["status"] == "ok"
+    assert (await dao_path.active_path(uid))["rank"] == 4
+    assert after["daohang"] == 400
+    assert state["points"] == 0
+    assert await character.item_qty(uid, "天外残玉") == 0
 
 
 @pytest.mark.asyncio

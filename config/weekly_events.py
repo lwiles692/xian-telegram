@@ -20,6 +20,10 @@ ACTIVITY_MATERIALS = ["天魔令", "丹霞玉", "剑冢铁"]
 SHOP_OFFERS = {
     "baoming": {"name": "保命符", "reward_kind": "item", "reward_item": "保命符",
                 "reward_qty": 1, "material_cost": 2},
+    "switch_token": {"name": "转修令", "reward_kind": "item", "reward_item": "转修令",
+                     "reward_qty": 1, "material_cost": 4},
+    "path_material": {"name": "天外残玉", "reward_kind": "item", "reward_item": "天外残玉",
+                      "reward_qty": 1, "material_cost": 5},
     "ascension": {"name": "飞升点", "reward_kind": "ascension",
                   "reward_qty": 1, "material_cost": 3},
 }

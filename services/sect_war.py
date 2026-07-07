@@ -6,6 +6,7 @@ import time
 
 from config import sect_war as CFG
 from models import db
+from services import activity
 from services import character
 from services.combat import Combatant, simulate
 
@@ -41,12 +42,28 @@ async def capture(user_id: int, outpost_key: str, score: int = None, now: int = 
                 "weekday": CFG.WAR_WEEKDAY,
                 "start_hour": CFG.WAR_START_HOUR, "end_hour": CFG.WAR_END_HOUR}
     outpost = CFG.OUTPOSTS[outpost_key]
-    cur = await db.fetchone("SELECT sect_id FROM sect_members WHERE user_id=?", (user_id,))
-    if not cur:
-        return {"status": "not_member"}
-    sect_id = cur["sect_id"]
+    async with db.transaction() as conn:
+        cur = await conn.execute("SELECT sect_id FROM sect_members WHERE user_id=?", (user_id,))
+        member = await cur.fetchone()
+        await cur.close()
+        if not member:
+            return {"status": "not_member"}
+        sect_id = member["sect_id"]
+        row = await character._select_character(conn, user_id)
+        if not row:
+            return {"status": "missing"}
+        welfare = await character._sect_welfare(conn, user_id)
+        stamina, stamina_at = character._settled_stamina(row, now, welfare)
+        if stamina < CFG.WAR_STAMINA_COST:
+            await conn.execute(
+                "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+                (stamina, stamina_at, user_id))
+            await activity.record_virtual_window(
+                user_id, "sect_war", outpost_key, now,
+                CFG.WAR_NO_STAMINA_WINDOW_SECONDS, conn=conn)
+            return {"status": "no_stamina", "need": CFG.WAR_STAMINA_COST, "have": stamina}
+        char = character._from_row(row, stamina, stamina_at)
     # spec §8.1：先复用战斗引擎击败据点守卫，胜方才计入宗门积分；败则无积分。
-    char = await character.get(user_id)
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
     mods = await character.combat_mods(user_id)
@@ -56,19 +73,54 @@ async def capture(user_id: int, outpost_key: str, score: int = None, now: int = 
     result = simulate(
         player, _guard_combatant(outpost),
         seed=random.getrandbits(32), max_rounds=None)
-    if result["winner"] is not player:
+    won = result["winner"] is player
+    gain = int(outpost["win_score"] if score is None else score) if won else None
+    stamina_res = await _commit_capture_result(user_id, outpost_key, sect_id, gain, now)
+    if stamina_res["status"] != "ok":
+        return stamina_res
+    if not won:
         return {"status": "defeated", "outpost": outpost["name"],
-                "guard": outpost["guard"]["name"]}
-    gain = int(outpost["win_score"] if score is None else score)
-    season = _season(now)
+                "guard": outpost["guard"]["name"], "stamina_left": stamina_res["stamina_left"]}
+    return {"status": "ok", "outpost": outpost["name"], "score": gain,
+            "stamina_left": stamina_res["stamina_left"]}
+
+
+async def _commit_capture_result(user_id: int, outpost_key: str, sect_id: int,
+                                 gain: int | None, now: int) -> dict:
     async with db.transaction() as conn:
-        # 复合主键 (sect_id, outpost_key)：一个宗门可同时持有多个据点，各自累计积分。
+        row = await character._select_character(conn, user_id)
+        if not row:
+            return {"status": "missing"}
+        welfare = await character._sect_welfare(conn, user_id)
+        stamina, stamina_at = character._settled_stamina(row, now, welfare)
+        if stamina < CFG.WAR_STAMINA_COST:
+            await conn.execute(
+                "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+                (stamina, stamina_at, user_id))
+            await activity.record_virtual_window(
+                user_id, "sect_war", outpost_key, now,
+                CFG.WAR_NO_STAMINA_WINDOW_SECONDS, conn=conn)
+            return {"status": "no_stamina", "need": CFG.WAR_STAMINA_COST, "have": stamina}
+        left = stamina - CFG.WAR_STAMINA_COST
         await conn.execute(
-            "INSERT INTO sect_outposts(sect_id, outpost_key, score, season, updated_at) "
-            "VALUES(?,?,?,?,?) "
-            "ON CONFLICT(sect_id, outpost_key) DO UPDATE SET score=score+?, season=?, updated_at=?",
-            (sect_id, outpost_key, gain, season, now, gain, season, now))
-        return {"status": "ok", "outpost": outpost["name"], "score": gain}
+            "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+            (left, stamina_at, user_id))
+        await activity.record_virtual_window(
+            user_id, "sect_war", outpost_key, now,
+            CFG.WAR_ACTION_DURATION_SECONDS, conn=conn)
+        if gain is not None:
+            season = _season(now)
+            # 复合主键 (sect_id, outpost_key)：一个宗门可同时持有多个据点，各自累计积分。
+            # 若上季结算任务停机错过，新赛季首次争夺重置该据点积分，不把旧分改签进新季。
+            await conn.execute(
+                "INSERT INTO sect_outposts(sect_id, outpost_key, score, season, updated_at) "
+                "VALUES(?,?,?,?,?) "
+                "ON CONFLICT(sect_id, outpost_key) DO UPDATE SET "
+                "score=CASE WHEN season=excluded.season THEN score+excluded.score "
+                "ELSE excluded.score END, "
+                "season=excluded.season, updated_at=excluded.updated_at",
+                (sect_id, outpost_key, gain, season, now))
+        return {"status": "ok", "stamina_left": left}
 
 
 async def settle_season(now: int = None) -> dict:
