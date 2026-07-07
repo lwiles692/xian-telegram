@@ -252,9 +252,11 @@ async def test_render_buy_editor_shows_step_callbacks_and_clamps_to_max_qty(temp
     assert "单价：12 灵石" in text
     assert "数量：8" in text
     assert "总价：96 灵石（持有 100）" in text
-    assert any(d.startswith("shop:bqty:灵草:7:") for d in datas)
-    assert any(d.startswith("shop:bqty:灵草:9:") for d in datas)
-    assert any(d.startswith("shop:bqty:灵草:8:") for d in datas)
+    assert any(d.startswith("shop:bqty:灵草:7:") for d in datas)    # ➖1
+    assert any(d.startswith("shop:bqty:灵草:9:") for d in datas)    # ➕1
+    assert any(d.startswith("shop:bqty:灵草:-2:") for d in datas)   # ➖10（越界，回调时会兜底夹到 1）
+    assert any(d.startswith("shop:bqty:灵草:18:") for d in datas)   # ➕10
+    assert any(d.startswith("shop:bqty:灵草:8:") for d in datas)    # 最大
     assert any(d.startswith("shop:bdo:灵草:8:") for d in datas)
     assert markup.inline_keyboard[-1][0].callback_data == "shop:cat:material"
 
@@ -274,9 +276,11 @@ async def test_render_sell_editor_shows_step_callbacks_and_clamps_to_inventory(t
     assert "单价：20 灵石" in text
     assert "数量：3" in text
     assert "总得款：60 灵石（库存 3）" in text
-    assert any(d.startswith("shop:sqty:疗伤丹:2:") for d in datas)
-    assert any(d.startswith("shop:sqty:疗伤丹:4:") for d in datas)
-    assert any(d.startswith("shop:sqty:疗伤丹:3:") for d in datas)
+    assert any(d.startswith("shop:sqty:疗伤丹:2:") for d in datas)   # ➖1
+    assert any(d.startswith("shop:sqty:疗伤丹:4:") for d in datas)   # ➕1
+    assert any(d.startswith("shop:sqty:疗伤丹:-7:") for d in datas)  # ➖10（越界，回调时会兜底夹到 1）
+    assert any(d.startswith("shop:sqty:疗伤丹:13:") for d in datas)  # ➕10
+    assert any(d.startswith("shop:sqty:疗伤丹:3:") for d in datas)   # 最大
     assert any(d.startswith("shop:sdo:疗伤丹:3:") for d in datas)
     assert markup.inline_keyboard[-1][0].callback_data == "shop:cat:sell"
 
