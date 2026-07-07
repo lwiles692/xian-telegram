@@ -252,9 +252,10 @@ async def test_render_buy_editor_shows_step_callbacks_and_clamps_to_max_qty(temp
     assert "单价：12 灵石" in text
     assert "数量：8" in text
     assert "总价：96 灵石（持有 100）" in text
-    assert any(d.startswith("shop:bqty:灵草:7:") for d in datas)
-    assert any(d.startswith("shop:bqty:灵草:9:") for d in datas)
-    assert any(d.startswith("shop:bqty:灵草:8:") for d in datas)
+    assert any(d.startswith("shop:bqty:灵草:7:") for d in datas)    # ➖1
+    assert any(d.startswith("shop:bqty:灵草:9:") for d in datas)    # ➕1
+    assert any(d.startswith("shop:bqty:灵草:-2:") for d in datas)   # ➖10（越界，回调时会兜底夹到 1）
+    assert any(d.startswith("shop:bqty:灵草:18:") for d in datas)   # ➕10
     assert any(d.startswith("shop:bdo:灵草:8:") for d in datas)
     assert markup.inline_keyboard[-1][0].callback_data == "shop:cat:material"
 

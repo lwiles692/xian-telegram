@@ -32,6 +32,8 @@ python -m tools.balance_sim   # balance/economy regression report
 ```
 SQLite auto-created at `data/xian.db` (gitignored). No CI, no Dockerfile, no Makefile.
 
+**Testing discipline (required)**: after any code change, run the tests — and regress the full suite via `python -m pytest`, never just the touched file/case. Update the matching tests when behavior changes; commit only when everything is green. No CI backstop — a fully green local run is the only line of defense.
+
 ## Critical Conventions (project-wide)
 - `from __future__ import annotations` first line of every module.
 - Absolute imports only. No relative imports. Empty `__init__.py` in every package.
