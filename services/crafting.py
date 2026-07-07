@@ -140,10 +140,13 @@ async def start_job(user_id: int, recipe_key: str, now: int = None) -> dict:
             return {"status": "busy"}
         if char["spirit_stone"] < recipe["stone"]:
             return {"status": "no_stone", "need": recipe["stone"], "have": char["spirit_stone"]}
+        missing = []
         for key, qty in recipe["materials"].items():
             have = await character.item_qty_conn(conn, user_id, key)
             if have < qty:
-                return {"status": "no_material", "item": key, "need": qty, "have": have}
+                missing.append({"item": key, "need": qty, "have": have})
+        if missing:
+            return {"status": "no_material", "missing": missing}
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
             (recipe["stone"], user_id))

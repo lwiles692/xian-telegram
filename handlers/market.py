@@ -69,7 +69,7 @@ async def render_market_category(user_id: int, cat: str):
                 else:
                     buttons.append(InlineKeyboardButton(
                         text=f"购买 #{row['id']}",
-                        callback_data=await action_callback_data(user_id, f"market:buy:{row['id']}")))
+                        callback_data=await action_callback_data(user_id, f"market:buy_edit:{row['id']}")))
         else:
             lines.append("暂无挂单。")
     else:
@@ -158,6 +158,47 @@ async def render_listing_editor(user_id: int, key: str, price: int, qty: int = D
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+async def render_buy_editor(user_id: int, listing_id: int, qty: int = None):
+    """购买数量编辑器：调整购买数量后确认。"""
+    listing = await market.get_listing(listing_id)
+    if not listing or listing["status"] != "active":
+        return "该挂单已不存在或已售出。", section_back_markup("↩️ 返回坊市", "nav:market")
+
+    if listing["seller_id"] == user_id:
+        return "不可购买自己的挂单。", section_back_markup("↩️ 返回坊市", "nav:market")
+
+    max_qty = listing["qty"]
+    default_qty = max_qty if qty is None else qty
+    qty = max(MIN_LIST_QTY, min(max_qty, int(default_qty)))
+    buy_price = int(listing["price"] * qty / max_qty + 0.5)
+
+    unit_price = listing["price"] / max_qty
+    lines = [
+        f"🏷️ 购买 {listing['item']} #{listing_id}",
+        f"在售：{max_qty} 个 · 总价 {listing['price']} 灵石（单价 {unit_price:.1f} 灵石）",
+        f"购买数量：{qty} 个",
+        f"应付：{buy_price} 灵石",
+    ]
+    rows = [
+        [InlineKeyboardButton(
+            text="➖ 1",
+            callback_data=await action_callback_data(
+                user_id, f"market:buy_qty:{listing_id}:{max(MIN_LIST_QTY, qty - 1)}")),
+         InlineKeyboardButton(
+            text="➕ 1",
+            callback_data=await action_callback_data(
+                user_id, f"market:buy_qty:{listing_id}:{min(max_qty, qty + 1)}"))],
+        [InlineKeyboardButton(
+            text=f"✅ 确认购买（×{qty} / {buy_price} 灵石）",
+            callback_data=await action_callback_data(
+                user_id, f"market:buy_cfm:{listing_id}:{qty}"))],
+        [InlineKeyboardButton(
+            text="↩️ 返回浏览",
+            callback_data="market:cat:buy")],
+    ]
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def _result_text(res: dict) -> str:
     s = res["status"]
     if s == "ok" and "listing_id" in res:
@@ -179,7 +220,9 @@ def _result_text(res: dict) -> str:
     if s == "forbidden":
         return "不可撤回他人挂单。"
     if s == "bad_request":
-        return "上架参数不合规。"
+        if "available" in res:
+            return f"该挂单当前仅剩 {res['available']} 个可购买。"
+        return "操作参数不合规。"
     if s == "missing":
         return NEED_START
     return "坊市操作未成。"
@@ -240,7 +283,31 @@ async def cb_market_action(callback: CallbackQuery):
         await show(callback, text, markup)
         await callback.answer()
         return
-    if op == "confirm":
+    # 购买编辑器：buy_edit=打开，buy_qty=调数量重绘
+    if op == "buy_edit":
+        try:
+            text, markup = await render_buy_editor(uid, int(value))
+        except (TypeError, ValueError):
+            text, markup = "操作参数有误。", section_back_markup("↩️ 返回坊市", "nav:market")
+        await show(callback, text, markup)
+        await callback.answer()
+        return
+    if op == "buy_qty":
+        try:
+            lid, qty = value.split(":", 1)
+            text, markup = await render_buy_editor(uid, int(lid), int(qty))
+        except (TypeError, ValueError):
+            text, markup = "操作参数有误。", section_back_markup("↩️ 返回坊市", "nav:market")
+        await show(callback, text, markup)
+        await callback.answer()
+        return
+    if op == "buy_cfm":
+        try:
+            lid, qty = value.split(":", 1)
+            res = await market.buy_partial(uid, int(lid), int(qty))
+        except (TypeError, ValueError):
+            res = {"status": "bad_request"}
+    elif op == "confirm":
         parsed = _parse_listing_payload(op, value)
         if not parsed:
             res = {"status": "bad_request"}
@@ -248,8 +315,15 @@ async def cb_market_action(callback: CallbackQuery):
             key, qty, price = parsed
             res = await market.create_listing(uid, key, qty, price)
     elif op == "buy":
-        res = await market.buy(uid, int(value))
+        # 旧版一次性购买 token 仍可能在 15 分钟内残留，保留到自然过期。
+        try:
+            res = await market.buy(uid, int(value))
+        except (TypeError, ValueError):
+            res = {"status": "bad_request"}
     else:
-        res = await market.cancel(uid, int(value))
+        try:
+            res = await market.cancel(uid, int(value))
+        except (TypeError, ValueError):
+            res = {"status": "bad_request"}
     await show(callback, _result_text(res), section_back_markup("↩️ 返回坊市", "nav:market"))
     await callback.answer()

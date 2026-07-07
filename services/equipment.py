@@ -105,6 +105,21 @@ async def reforge(user_id: int, instance_id: int) -> dict:
                 "affixes": affixes, "cost": cost}
 
 
+async def unequip(user_id: int, instance_id: int) -> dict:
+    async with db.transaction() as conn:
+        inst = await _get_instance(conn, user_id, instance_id)
+        if not inst:
+            return {"status": "not_found"}
+        if not equipment_slot(inst["base_key"]):
+            return {"status": "not_equipment"}
+        if not inst["equipped_slot"]:
+            return {"status": "not_equipped"}
+        await conn.execute(
+            "UPDATE item_instances SET equipped_slot=NULL WHERE id=? AND user_id=?",
+            (instance_id, user_id))
+        return {"status": "ok", "name": item_name(inst["base_key"]), "unequipped": True}
+
+
 async def decompose(user_id: int, instance_id: int) -> dict:
     async with db.transaction() as conn:
         inst = await _get_instance(conn, user_id, instance_id)
