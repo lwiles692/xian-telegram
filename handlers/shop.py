@@ -171,7 +171,10 @@ async def render_buy_editor(user_id: int, key: str, qty: int):
             callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{qty + 1}")),
          InlineKeyboardButton(
             text="➕ 10",
-            callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{qty + 10}"))],
+            callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{qty + 10}")),
+         InlineKeyboardButton(
+            text="最大",
+            callback_data=await action_callback_data(user_id, f"shop:bqty:{key}:{max_qty}"))],
         [InlineKeyboardButton(
             text=f"✅ 确认购买（{qty} 件 / {total} 灵石）",
             callback_data=await action_callback_data(user_id, f"shop:bdo:{key}:{qty}"))],
@@ -202,11 +205,17 @@ async def render_sell_editor(user_id: int, key: str, qty: int):
     gain = unit * qty
     rows = [
         [InlineKeyboardButton(
+            text="➖ 10",
+            callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{qty - 10}")),
+         InlineKeyboardButton(
             text="➖ 1",
             callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{qty - 1}")),
          InlineKeyboardButton(
             text="➕ 1",
             callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{qty + 1}")),
+         InlineKeyboardButton(
+            text="➕ 10",
+            callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{qty + 10}")),
          InlineKeyboardButton(
             text="最大",
             callback_data=await action_callback_data(user_id, f"shop:sqty:{key}:{max_qty}"))],
