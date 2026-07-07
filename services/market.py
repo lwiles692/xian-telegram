@@ -18,6 +18,15 @@ AUDIT_FREQUENT_WINDOW_SECONDS = 24 * 3600
 AUDIT_FREQUENT_MIN_TRADES = 3
 
 
+async def _record_trade(conn, listing_id: int, seller_id: int, buyer_id: int,
+                        item_key: str, qty: int, price: int, tax: int, now: int):
+    """写一条成交流水（审计的不可变依据，挂单行会被部分购买改写故独立记账）。"""
+    await conn.execute(
+        "INSERT INTO market_trades(listing_id, seller_id, buyer_id, item_key, qty, price, tax, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (listing_id, seller_id, buyer_id, item_key, int(qty), int(price), int(tax), int(now)))
+
+
 async def get_listing(listing_id: int) -> dict | None:
     """Fetch a single listing by ID."""
     row = await db.fetchone("SELECT * FROM market_listings WHERE id=?", (listing_id,))
@@ -89,6 +98,8 @@ async def buy(buyer_id: int, listing_id: int, now: int = None) -> dict:
             "UPDATE market_listings SET status='sold', buyer_id=?, updated_at=? "
             "WHERE id=? AND status='active'",
             (buyer_id, now, listing_id))
+        await _record_trade(conn, listing_id, listing["seller_id"], buyer_id,
+                            listing["item_key"], listing["qty"], listing["price"], tax, now)
         return {"status": "ok", "item": item_name(listing["item_key"]), "qty": listing["qty"],
                 "price": listing["price"], "tax": tax, "seller_gain": seller_gain}
 
@@ -139,7 +150,9 @@ async def buy_partial(buyer_id: int, listing_id: int, qty: int, now: int = None)
         await cur.close()
         if not buyer:
             return {"status": "missing"}
-        buy_price = int(listing["price"] * qty / listing["qty"] + 0.5)
+        # 单价 < 0.5 时四舍五入会得 0，兜底为 MIN_PRICE 防止 0 灵石白嫖；封顶挂单总价。
+        buy_price = min(listing["price"],
+                        max(MIN_PRICE, int(listing["price"] * qty / listing["qty"] + 0.5)))
         if buyer["spirit_stone"] < buy_price:
             return {"status": "no_stone", "need": buy_price, "have": buyer["spirit_stone"]}
         tax = int(buy_price * MARKET_TAX_RATE)
@@ -161,20 +174,30 @@ async def buy_partial(buyer_id: int, listing_id: int, qty: int, now: int = None)
                 (buyer_id, now, listing_id))
         else:
             remaining_qty = listing["qty"] - qty
-            remaining_price = listing["price"] - buy_price
+            # 残余单价过低时会算出 0 总价挂单，兜底为 MIN_PRICE，避免出现「0 灵石」残留挂单。
+            remaining_price = max(MIN_PRICE, listing["price"] - buy_price)
             await conn.execute(
                 "UPDATE market_listings SET qty=?, price=?, updated_at=? "
                 "WHERE id=? AND status='active'",
                 (remaining_qty, remaining_price, now, listing_id))
+        await _record_trade(conn, listing_id, listing["seller_id"], buyer_id,
+                            listing["item_key"], qty, buy_price, tax, now)
         return {"status": "ok", "item": item_name(listing["item_key"]), "qty": qty,
                 "price": buy_price, "tax": tax, "seller_gain": seller_gain}
 
 
 async def audit_suspicious(limit_price: int = 1_000_000) -> list[dict]:
-    rows = await db.fetchall(
+    """高价可疑记录：在售高价挂单 + 已成交高价流水（部分购买会抹掉挂单原价，故并查流水）。"""
+    listing_rows = await db.fetchall(
         "SELECT * FROM market_listings WHERE price>=? ORDER BY price DESC",
         (limit_price,))
-    return [_format(row) for row in rows]
+    trade_rows = await db.fetchall(
+        "SELECT * FROM market_trades WHERE price>=? ORDER BY price DESC",
+        (limit_price,))
+    results = [{**_format(row), "source": "listing"} for row in listing_rows]
+    results += [{**_format_trade(row), "source": "trade"} for row in trade_rows]
+    results.sort(key=lambda r: r["price"], reverse=True)
+    return results
 
 
 async def audit_frequent_trades(now: int = None, window_seconds: int = AUDIT_FREQUENT_WINDOW_SECONDS,
@@ -183,9 +206,9 @@ async def audit_frequent_trades(now: int = None, window_seconds: int = AUDIT_FRE
     since = now - int(window_seconds)
     rows = await db.fetchall(
         "SELECT seller_id, buyer_id, COUNT(*) AS trades, SUM(price) AS total_price, "
-        "MIN(updated_at) AS first_at, MAX(updated_at) AS last_at "
-        "FROM market_listings "
-        "WHERE status='sold' AND buyer_id IS NOT NULL AND updated_at>? AND updated_at<=? "
+        "MIN(created_at) AS first_at, MAX(created_at) AS last_at "
+        "FROM market_trades "
+        "WHERE created_at>? AND created_at<=? "
         "GROUP BY seller_id, buyer_id HAVING trades>=? "
         "ORDER BY trades DESC, total_price DESC",
         (since, now, int(min_trades)))
@@ -302,4 +325,19 @@ def _format(row) -> dict:
         "status": row["status"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+    }
+
+
+def _format_trade(row) -> dict:
+    return {
+        "id": row["id"],
+        "listing_id": row["listing_id"],
+        "seller_id": row["seller_id"],
+        "buyer_id": row["buyer_id"],
+        "item_key": row["item_key"],
+        "item": item_name(row["item_key"]),
+        "qty": row["qty"],
+        "price": row["price"],
+        "tax": row["tax"],
+        "created_at": row["created_at"],
     }

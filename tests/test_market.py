@@ -531,6 +531,71 @@ async def test_buy_partial_preserves_other_buyers_access(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_buy_partial_visible_to_frequent_trades_audit(temp_db):
+    """部分购买记入成交流水，刷灵石对子的高频交易不再对审计隐身。"""
+    seller, buyer = 9740, 9741
+    await character.create(seller, "wash-seller")
+    await character.create(buyer, "wash-buyer")
+    await character.add_item(seller, "星陨砂", 3)
+    await character.add_stone(buyer, 1000)
+
+    listing = await market.create_listing(seller, "星陨砂", 3, 300, now=1000)
+    # 同一挂单被同一对子分三次各买 1，任何一笔都不会清空挂单（除最后一笔）。
+    for idx in range(3):
+        res = await market.buy_partial(buyer, listing["listing_id"], 1, now=1001 + idx)
+        assert res["status"] == "ok"
+
+    rows = await market.audit_frequent_trades(now=2000, window_seconds=2000, min_trades=3)
+    assert rows
+    assert rows[0]["seller_id"] == seller
+    assert rows[0]["buyer_id"] == buyer
+    assert rows[0]["trades"] == 3
+
+
+@pytest.mark.asyncio
+async def test_buy_partial_high_value_flagged_by_audit(temp_db):
+    """高价挂单被部分买走后原价从挂单行抹掉，但高价成交仍被可疑审计捕获。"""
+    seller, buyer = 9742, 9743
+    await character.create(seller, "high-seller")
+    await character.create(buyer, "high-buyer")
+    await character.add_item(seller, "星陨砂", 2)
+    await character.add_stone(buyer, 5_000_000)
+
+    listing = await market.create_listing(seller, "星陨砂", 2, 4_000_000, now=1000)
+    # 买 1 个 → 成交价 2_000_000，挂单剩余价被改写为残值。
+    res = await market.buy_partial(buyer, listing["listing_id"], 1, now=1001)
+    assert res["status"] == "ok"
+    assert res["price"] == 2_000_000
+
+    rows = await market.audit_suspicious(limit_price=1_000_000)
+    trade_hits = [r for r in rows if r.get("source") == "trade"]
+    assert trade_hits
+    assert trade_hits[0]["price"] == 2_000_000
+    assert trade_hits[0]["buyer_id"] == buyer
+
+
+@pytest.mark.asyncio
+async def test_buy_partial_low_unit_price_charges_at_least_min(temp_db):
+    """单价 < 0.5 时兜底为 MIN_PRICE，不可 0 灵石白嫖，残留挂单也不显示 0 总价。"""
+    seller, buyer = 9744, 9745
+    await character.create(seller, "cheap-seller")
+    await character.create(buyer, "cheap-buyer")
+    await character.add_item(seller, "星陨砂", 4)
+
+    # 总价 1 灵石 / 4 个，单价 0.25，买 1 个原会四舍五入为 0。
+    listing = await market.create_listing(seller, "星陨砂", 4, 1, now=1000)
+    res = await market.buy_partial(buyer, listing["listing_id"], 1, now=1001)
+
+    assert res["status"] == "ok"
+    assert res["price"] >= market.MIN_PRICE
+
+    remaining = await market.get_listing(listing["listing_id"])
+    assert remaining["status"] == "active"
+    assert remaining["qty"] == 3
+    assert remaining["price"] >= market.MIN_PRICE
+
+
+@pytest.mark.asyncio
 async def test_buy_editor_uses_plain_text_without_markdown(temp_db):
     """购买数量编辑器不启用 Markdown，文案不可泄漏星号。"""
     from handlers.market import render_buy_editor

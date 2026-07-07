@@ -340,8 +340,23 @@ CREATE TABLE IF NOT EXISTS market_broadcast_state (
     chat_id          INTEGER PRIMARY KEY,
     last_notified_at INTEGER NOT NULL DEFAULT 0
 );
+-- 成交流水：每一笔成交（含部分购买）记一行，作为审计的不可变依据。
+-- 挂单行会被部分购买改写 price/qty，无法据此还原交易额与频次，故独立记账。
+CREATE TABLE IF NOT EXISTS market_trades (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id  INTEGER NOT NULL,
+    seller_id   INTEGER NOT NULL,
+    buyer_id    INTEGER NOT NULL,
+    item_key    TEXT NOT NULL,
+    qty         INTEGER NOT NULL,
+    price       INTEGER NOT NULL,
+    tax         INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_market_listings_notify
 ON market_listings(status, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_market_trades_audit
+ON market_trades(created_at, seller_id, buyer_id);
 """
 
 
