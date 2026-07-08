@@ -19,7 +19,7 @@ Pure data: dicts, lists, constants. No DB, no async, no imports of `services`/`h
 | `dao_paths.py` | five 道途 (剑/体/丹/器/符阵), `RANK_NAMES`, rank bonuses. |
 | `ascension.py` | `PASSIVE_CAP`, trial config, 飞升 reward table. |
 | `buffs.py` | buff caps (`ATTACK_PCT_CAP`, `SURVIVAL_PCT_CAP`), buff sources. |
-| `events.py` | `TRIBULATION_ACTIONS` (天劫/神魂劫 choices), random 奇遇 table. |
+| `events.py` | `TRIBULATION_ACTIONS` / `SHENHUN_TRIBULATION_ACTIONS` / `XUKONG_TRIBULATION_ACTIONS`, random 奇遇 table. |
 | `social.py` | social/broadcast rules, reputation caps. |
 | `sects.py` | 宗门 levels, `welfare(level)` fn, donate rewards, mission table. |
 | `sect_war.py` | 据点 outpost defs, scoring weights, season rewards. |

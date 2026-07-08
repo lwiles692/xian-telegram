@@ -26,6 +26,65 @@ async def _prepare_lianxu(uid: int):
 
 
 @pytest.mark.asyncio
+async def test_lianxu_breakthrough_needs_pill_before_xukong(temp_db):
+    uid = 9905
+    await character.create(uid, "缺丹客")
+    await character.set_progress(uid, 4, 3, R.advance_cost(4, 3))
+
+    res = await breakthrough.try_advance(uid, now=1000)
+
+    assert res == {"status": "need_pill", "pill": "炼虚丹"}
+
+
+@pytest.mark.asyncio
+async def test_lianxu_breakthrough_enters_xukong_choices(temp_db, monkeypatch):
+    uid = 9906
+    await _prepare_lianxu(uid)
+    monkeypatch.setattr(breakthrough.random, "random", lambda: 0.0)
+    monkeypatch.setattr(breakthrough.random, "randint", lambda _a, _b: 1)
+
+    start = await breakthrough.try_advance(uid, now=1000)
+    text = cultivate._bt_text(start)
+    old_choice = await breakthrough.choose_tribulation_action(uid, "endure", now=1001)
+    step = await breakthrough.choose_tribulation_action(uid, "source", now=1002)
+
+    assert start["status"] == "tribulation_choice"
+    assert [choice["key"] for choice in start["choices"]] == ["source", "artifact", "pill"]
+    assert [choice["label"] for choice in start["choices"]] == ["凝守本源", "祭护体法宝", "服大还丹"]
+    assert "虚空劫未尽" in text
+    assert old_choice["status"] == "bad_action"
+    assert step["status"] == "tribulation_choice"
+    assert "虚空劫" in "".join(step["last_log"])
+    assert "凝守本源" in "".join(step["last_log"])
+
+
+@pytest.mark.asyncio
+async def test_lianxu_xukong_failure_loses_cultivation_without_realm_drop(temp_db, monkeypatch):
+    uid = 9907
+    cost = R.advance_cost(4, 3)
+    await _prepare_lianxu(uid)
+    monkeypatch.setattr(breakthrough.random, "random", lambda: 0.0)
+    monkeypatch.setattr(breakthrough.random, "randint", lambda _a, _b: 1)
+
+    start = await breakthrough.try_advance(uid, now=1000)
+    await db.execute("UPDATE tribulation_sessions SET hp=1 WHERE user_id=?", (uid,))
+    res = await breakthrough.choose_tribulation_action(uid, "source", now=1001)
+    row = await db.fetchone(
+        "SELECT realm, stage, cultivation, big_fail_streak FROM characters WHERE user_id=?", (uid,))
+    text = cultivate._bt_text(res)
+
+    assert start["status"] == "tribulation_choice"
+    assert res["status"] == "big_fail"
+    assert res["loss"] == int(cost * breakthrough.FAIL_CULT_LOSS)
+    assert row["realm"] == 4
+    assert row["stage"] == 3
+    assert row["cultivation"] == cost - res["loss"]
+    assert row["big_fail_streak"] == 1
+    assert "虚空劫凶险" in text
+    assert "跌境" in text
+
+
+@pytest.mark.asyncio
 async def test_lianxu_big_fail_streak_increments_and_boosts_next_rate(temp_db, monkeypatch):
     uid = 9901
     await _prepare_lianxu(uid)
@@ -116,5 +175,6 @@ def test_breakthrough_text_shows_lianxu_guarantee_bonus():
         "tribulation_log": [],
     })
 
+    assert "虚空劫未尽" in text
     assert "本次破境成功率：65%" in text
     assert "保底+20%" in text

@@ -8,7 +8,8 @@ import json
 import random
 import time
 
-from config.events import SHENHUN_TRIBULATION_ACTIONS, TRIBULATION_ACTIONS
+from config.events import (SHENHUN_TRIBULATION_ACTIONS, TRIBULATION_ACTIONS,
+                           XUKONG_TRIBULATION_ACTIONS)
 from config.items import ITEMS
 from config.realms import (BIG_BREAKTHROUGH, advance_cost, is_big_breakthrough,
                            next_stage, realm_label, base_stats)
@@ -110,7 +111,19 @@ async def _fail(conn, user_id: int, cultivation: int, rate: float, trib: bool,
 
 
 def _tribulation_actions(target_realm: int) -> dict:
-    return SHENHUN_TRIBULATION_ACTIONS if target_realm == 4 else TRIBULATION_ACTIONS
+    if target_realm == 5:
+        return XUKONG_TRIBULATION_ACTIONS
+    if target_realm == 4:
+        return SHENHUN_TRIBULATION_ACTIONS
+    return TRIBULATION_ACTIONS
+
+
+def _trial_name(target_realm: int) -> str:
+    if target_realm == 5:
+        return "虚空劫"
+    if target_realm == 4:
+        return "神魂劫"
+    return "雷劫"
 
 
 def _tribulation_choices(target_realm: int) -> list[dict]:
@@ -243,7 +256,7 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
         hp -= dmg
         logs = json.loads(row["log_json"] or "[]")
         logs.append(action["text"])
-        trial_name = "神魂劫" if row["target_realm"] == 4 else "雷劫"
+        trial_name = _trial_name(row["target_realm"])
         logs.append(f"第 {idx} 道{trial_name}落下，承伤 {dmg}，余气血 {max(0, hp)}/{max_hp}")
         if hp <= 0:
             await conn.execute("DELETE FROM tribulation_sessions WHERE user_id=?", (user_id,))

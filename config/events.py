@@ -88,3 +88,27 @@ SHENHUN_TRIBULATION_ACTIONS = {
         "text": "服下一枚大还丹，药力稳住翻涌气血。",
     },
 }
+
+XUKONG_TRIBULATION_ACTIONS = {
+    "source": {
+        "label": "凝守本源",
+        "shield": 260,
+        "heal_pct": 0.0,
+        "item": None,
+        "text": "凝守本源，任虚空裂隙刮骨，不令元神离位。",
+    },
+    "artifact": {
+        "label": "祭护体法宝",
+        "shield": 360,
+        "heal_pct": 0.0,
+        "item": None,
+        "text": "祭起护体法宝，玄光护住肉身，不坠虚无。",
+    },
+    "pill": {
+        "label": "服大还丹",
+        "shield": 120,
+        "heal_pct": 0.45,
+        "item": "大还丹",
+        "text": "服下一枚大还丹，药力续住崩裂经脉。",
+    },
+}

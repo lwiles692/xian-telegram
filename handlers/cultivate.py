@@ -5,7 +5,6 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from config.events import TRIBULATION_ACTIONS
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
                              action_callback_data, append_main_menu_return,
                              consume_action_callback, menu_with_breakthrough,
@@ -77,8 +76,7 @@ def _bt_text(res: dict) -> str:
         return f"大境界突破需「{pill}」护道，道友尚缺此物。{hint}"
     if s == "tribulation_choice":
         tail = "\n".join(res.get("last_log") or res.get("tribulation_log") or [])
-        trial = "神魂劫" if res.get("target_realm") == 4 else "天劫"
-        fall = "魔念翻涌" if res.get("target_realm") == 4 else "雷将落"
+        trial, fall = _trial_copy(res.get("target_realm"))
         prefix = f"⚡ {trial}未尽，第 {res['thunder_index']}/{res.get('total', 3)} 段{fall}。"
         hp = f"\n当前气血：{res['hp']}" if res.get("hp") is not None else ""
         return "\n".join(line for line in [prefix + hp, _rate_text(res), tail, "请选择应对。"] if line)
@@ -94,16 +92,24 @@ def _bt_text(res: dict) -> str:
         tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
         rate = f"\n{_rate_text(res)}" if _rate_text(res) else ""
         if res["tribulation"]:
-            trial = "神魂劫" if "神魂劫" in tail else "天劫"
+            trial = _trial_from_log(tail)
             if trial == "神魂劫":
                 return f"🌀 神魂劫已尽，心魔归寂——道友破妄凝神，臻至 {res['label']}！{rate}{tail}"
+            if trial == "虚空劫":
+                return f"🌌 虚空劫已尽，肉身归真——道友踏破虚无，臻至 {res['label']}！{rate}{tail}"
             return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！{rate}{tail}"
         return f"✨ 灵气灌顶，道友冲破桎梏，迈入 {res['label']}！{rate}"
     if s == "big_fail":
         tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
         rate = f"\n{_rate_text(res)}" if _rate_text(res) else ""
         if res["tribulation"]:
-            head = "🌀 神魂劫凶险" if "神魂劫" in tail else "⚡ 天劫凶猛"
+            trial = _trial_from_log(tail)
+            if trial == "神魂劫":
+                head = "🌀 神魂劫凶险"
+            elif trial == "虚空劫":
+                head = "🌌 虚空劫凶险"
+            else:
+                head = "⚡ 天劫凶猛"
         else:
             head = "✗ 冲关受阻"
         return (
@@ -122,6 +128,22 @@ def _rate_text(res: dict) -> str:
         bonus = int(round(guarantee * 100))
         return f"本次破境成功率：{rate}%（保底+{bonus}%）。"
     return f"本次破境成功率：{rate}%。"
+
+
+def _trial_copy(target_realm: int | None) -> tuple[str, str]:
+    if target_realm == 5:
+        return "虚空劫", "虚空裂身"
+    if target_realm == 4:
+        return "神魂劫", "魔念翻涌"
+    return "天劫", "雷将落"
+
+
+def _trial_from_log(text: str) -> str:
+    if "虚空劫" in text:
+        return "虚空劫"
+    if "神魂劫" in text:
+        return "神魂劫"
+    return "天劫"
 
 
 async def _bt_markup(user_id: int, res: dict):
