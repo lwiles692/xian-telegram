@@ -15,6 +15,17 @@ def _name(user) -> str:
     return user.username or user.full_name or str(user.id)
 
 
+def _outcome_text(res: dict) -> str:
+    reason = res.get("finish_reason")
+    if reason == "round_limit":
+        return ("久战未决，斗法台判你残余气机更盛" if res["win"]
+                else "久战未决，斗法台判对手残余气机更盛")
+    if reason == "double_down":
+        return ("双双力竭，斗法台判你气机更盛" if res["win"]
+                else "双双力竭，斗法台判对手气机更盛")
+    return "技高一筹" if res["win"] else "惜败半招"
+
+
 def _text(res: dict, opponent_name: str = "对手") -> str:
     s = res["status"]
     if s == "ok":
@@ -27,7 +38,7 @@ def _text(res: dict, opponent_name: str = "对手") -> str:
         return "\n".join([
             f"⚔️ 切磋：{attacker} vs {defender}",
             *shown,
-            f"{'技高一筹' if res['win'] else '惜败半招'}，天梯积分 {res['rating_delta']:+d}{tier_txt}，"
+            f"{_outcome_text(res)}，天梯积分 {res['rating_delta']:+d}{tier_txt}，"
             f"{rep_txt}。周榜奖池按声望排名结算。",
         ])
     if s == "no_opponent":

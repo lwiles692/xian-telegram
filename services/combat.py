@@ -116,6 +116,8 @@ def _round_heal_factor(round_no: int, rules: CombatRules) -> float:
 
 
 def _pressure_damage(c: Combatant, round_no: int, rules: CombatRules) -> int:
+    if c.hp <= 0:
+        return 0
     start = int(rules.pressure_start_round or 0)
     if start <= 0 or round_no <= start:
         return 0

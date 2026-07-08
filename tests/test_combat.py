@@ -124,6 +124,7 @@ def _profile_player(name: str, realm: int, stage: int, profile: dict,
 
 
 def test_pvp_duel_ban_resolves_common_huashen_profiles():
+    # 复用 tools.balance_sim 的真实化神调参档，确保 PvP 禁制回归跟内容平衡口径同源。
     last = R.num_stages(4) - 1
     profiles = [
         ("化神主线", 4, last, B.HUASHEN_GEARED, {}),

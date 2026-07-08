@@ -14,6 +14,9 @@ DAILY_LIMIT = 10
 WIN_REPUTATION = 3
 LOSS_REPUTATION = 1
 PVP_MAX_ROUNDS = 160
+# spec §10：PvP 不掉资源但须即时结算；斗法禁制数值按化神主线/分支/剑修/体修/
+# 极限龟甲矩阵调校。回归口径见 tests/test_combat.py：标准、攻杀、盾攻、普攻构筑
+# 0/1470 场满回合；纯龟缩（回春术/金钟罩/定身符）保留 160 回合裁定边界。
 PVP_COMBAT_RULES = CombatRules(
     heal_factor=0.08,
     heal_decay_start_round=45,
