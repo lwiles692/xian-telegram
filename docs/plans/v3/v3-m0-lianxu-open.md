@@ -56,7 +56,8 @@ config/shop.py: STAMINA_BUY_BASE[5] = 6000
 - `config/items.py`:新增 `炼虚丹`、`炼虚丹残方`、`炼虚丹方`(recipe 物品);
   `NO_TRADE += {"炼虚丹"}`(坊市/拍卖行共用,spec §3.4)。
 - `config/recipes.py`:炼丹配方 `lianxu_pill`(需习得丹方);**残方合成保底**:`炼虚丹残方 ×4 →
-  炼虚丹(产物 bound=1)`,照抄 `huashen_pill_from_fragments` 管线(`config/recipes.py:106`)。
+  炼虚丹(产物 bound=1)`,复用 `huashen_pill` recipe 管线(`config/recipes.py:107`)。
+  材料配比按 spec §3.4 的 `×4`,非照抄化神丹的 `残方×6+妖丹×4`,避免实施时误配。
 - 掉落来源(spec §3.4 首破权重原则:第一枚 100% 落在化神可及内容):
   - 化神难图 `天外古墟`:极低概率 `炼虚丹残方` / `炼虚丹`;
   - 秘境 `太虚天门` 深层:完整丹方 / 材料 / 残方(稳定小概率);

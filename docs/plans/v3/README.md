@@ -26,7 +26,9 @@
   无 v2 时期的 `range(4)` 硬编码;追加 realm 5 报告自动覆盖 ✓。
 - 天劫状态机按 `target_realm` 分流已有先例(`services/breakthrough.py:84`:神魂劫 vs 雷劫)——
   虚空劫 = 再加一档选项/文案,无需加表 ✓。
-- 残方合成有现成管线:`config/recipes.py:106` `化神丹残方×6+妖丹→化神丹`,炼虚丹残方×4 照抄,加产物绑定。
+- 残方合成有现成管线:`config/recipes.py:107` 的 recipe key `huashen_pill`
+  (`化神丹残方×6+妖丹×4→化神丹`);炼虚丹复用该管线,但材料配比按 spec §3.4 的
+  `炼虚丹残方×4`,非照搬化神丹的 `×6+妖丹×4`,并加产物绑定。
 - 满淬炼档已进 balance_sim(`DAO_MAX_REFINED_PROFILES`,`tools/balance_sim.py:50)——
   §1.1 收口项 2 实际只差"化神圆满满 buff **组合档**",工作量小于 spec 预估。
 - 满 buff 档做法有先例:`YUANYING_FULL_BUFF`(`tools/balance_sim.py:41`)用 `extra_pct` 直接推到
