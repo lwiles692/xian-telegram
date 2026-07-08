@@ -21,6 +21,28 @@ CRIT_MULT = 1.5
 MP_REGEN_PCT = 0.05
 
 
+@dataclass(frozen=True)
+class CombatRules:
+    """战斗环境修正；默认值等同原始规则，PvP 可传入斗法台禁制。"""
+
+    heal_factor: float = 1.0
+    heal_decay_start_round: int = 0
+    heal_decay_per_round: float = 0.0
+    lifesteal_factor: float = 1.0
+    shield_absorb_pct: float = 1.0
+    damage_growth_start_round: int = 0
+    damage_growth_per_round: float = 0.0
+    damage_growth_cap: float = 0.0
+    pressure_start_round: int = 0
+    pressure_base_pct: float = 0.0
+    pressure_growth_pct: float = 0.0
+    pressure_cap_pct: float = 0.0
+    notice: str = ""
+
+
+DEFAULT_RULES = CombatRules()
+
+
 @dataclass
 class Combatant:
     name: str
@@ -73,7 +95,48 @@ def _choose_skill(actor):
     return "普攻"
 
 
-def _act(actor, target, rng, log):
+def _round_damage_multiplier(round_no: int, rules: CombatRules) -> float:
+    start = int(rules.damage_growth_start_round or 0)
+    if start <= 0 or round_no <= start:
+        return 1.0
+    growth = max(0.0, float(rules.damage_growth_per_round or 0.0))
+    cap = max(0.0, float(rules.damage_growth_cap or 0.0))
+    return 1.0 + min(cap, (round_no - start) * growth)
+
+
+def _round_heal_factor(round_no: int, rules: CombatRules) -> float:
+    floor = max(0.0, float(rules.heal_factor))
+    start = int(rules.heal_decay_start_round or 0)
+    decay = max(0.0, float(rules.heal_decay_per_round or 0.0))
+    if start <= 0 or decay <= 0:
+        return floor
+    if round_no <= start:
+        return 1.0
+    return max(floor, 1.0 - (round_no - start) * decay)
+
+
+def _pressure_damage(c: Combatant, round_no: int, rules: CombatRules) -> int:
+    if c.hp <= 0:
+        return 0
+    start = int(rules.pressure_start_round or 0)
+    if start <= 0 or round_no <= start:
+        return 0
+    base = max(0.0, float(rules.pressure_base_pct or 0.0))
+    growth = max(0.0, float(rules.pressure_growth_pct or 0.0))
+    cap = max(0.0, float(rules.pressure_cap_pct or 0.0))
+    pct = min(cap, base + max(0, round_no - start) * growth)
+    return max(1, int(c.max_hp * pct)) if pct > 0 else 0
+
+
+def _tick_pressure(a: Combatant, d: Combatant, round_no: int, rules: CombatRules):
+    for c in (a, d):
+        dmg = _pressure_damage(c, round_no, rules)
+        if dmg:
+            c.hp -= dmg
+
+
+def _act(actor, target, rng, log, rules: CombatRules,
+         round_no: int, damage_multiplier: float):
     if actor.stunned:
         actor.stunned = False
         log.append(f"❄️ {actor.name} 被定身，难以动弹。")
@@ -86,19 +149,31 @@ def _act(actor, target, rng, log):
     t = sk["type"]
     if t in ("normal", "burst"):
         dmg, crit = _hit(actor, target, sk["coef"], rng)
+        dmg = max(1, int(dmg * damage_multiplier))
         if target.shield:
             target.shield = False
-            log.append(f"🛡️ {target.name} 运护盾，挡下「{sk['name']}」！")
+            absorb = min(1.0, max(0.0, float(rules.shield_absorb_pct)))
+            if absorb >= 1.0:
+                log.append(f"🛡️ {target.name} 运护盾，挡下「{sk['name']}」！")
+                return
+            blocked = max(0, int(dmg * absorb))
+            dmg = max(1, dmg - blocked)
+            target.hp -= dmg
+            log.append(f"🛡️ {target.name} 运护盾卸去 {blocked}，仍受「{sk['name']}」伤 {dmg}。")
+            _after_direct_damage(actor, target, dmg, log, rules)
         else:
             target.hp -= dmg
             log.append(f"{actor.name} 施「{sk['name']}」{'（暴击）' if crit else ''}，伤 {dmg}。")
-            _after_direct_damage(actor, target, dmg, log)
+            _after_direct_damage(actor, target, dmg, log, rules)
     elif t == "dot":
         dmg, _ = _hit(actor, target, sk["coef"], rng)
         target.dots.append([sk["dur"], dmg])
-        log.append(f"{actor.name} 施「{sk['name']}」，灼烧 {sk['dur']} 回合（每回合 {dmg}）。")
+        if rules.damage_growth_per_round or rules.damage_growth_cap:
+            log.append(f"{actor.name} 施「{sk['name']}」，灼烧 {sk['dur']} 回合（伤势随战意递增）。")
+        else:
+            log.append(f"{actor.name} 施「{sk['name']}」，灼烧 {sk['dur']} 回合（每回合 {dmg}）。")
     elif t == "heal":
-        heal = int(actor.max_hp * sk["heal_pct"])
+        heal = int(actor.max_hp * sk["heal_pct"] * _round_heal_factor(round_no, rules))
         actor.hp = min(actor.max_hp, actor.hp + heal)
         log.append(f"{actor.name} 运「{sk['name']}」，回复气血 {heal}。")
     elif t == "shield":
@@ -109,9 +184,10 @@ def _act(actor, target, rng, log):
         log.append(f"{actor.name} 祭「{sk['name']}」，定住 {target.name}！")
 
 
-def _after_direct_damage(actor, target, dmg, log):
-    if actor.lifesteal_pct > 0:
-        healed = min(actor.max_hp - actor.hp, int(dmg * actor.lifesteal_pct))
+def _after_direct_damage(actor, target, dmg, log, rules: CombatRules):
+    lifesteal = actor.lifesteal_pct * max(0.0, float(rules.lifesteal_factor))
+    if lifesteal > 0:
+        healed = min(actor.max_hp - actor.hp, int(dmg * lifesteal))
         if healed > 0:
             actor.hp += healed
             log.append(f"🩸 {actor.name} 汲取气血 {healed}。")
@@ -122,14 +198,14 @@ def _after_direct_damage(actor, target, dmg, log):
             log.append(f"↩️ {target.name} 反震 {reflected}。")
 
 
-def _tick_dots(c, log):
+def _tick_dots(c, log, damage_multiplier: float = 1.0):
     if not c.dots:
         return
     total = 0
     alive = []
     for d in c.dots:
         d[0] -= 1
-        total += d[1]
+        total += max(1, int(d[1] * damage_multiplier))
         if d[0] > 0:
             alive.append(d)
     c.dots = alive
@@ -174,29 +250,36 @@ def _winner_line(winner, reason, max_rounds: int):
 
 
 def simulate(a: Combatant, d: Combatant, seed: int = 0, *,
-             max_rounds: int | None = MAX_ROUNDS) -> dict:
+             max_rounds: int | None = MAX_ROUNDS,
+             rules: CombatRules | None = None) -> dict:
+    rules = rules or DEFAULT_RULES
     rng = random.Random(seed)
     log = [f"⚔️ {a.name} 对阵 {d.name}！"]
+    if rules.notice:
+        log.append(rules.notice)
     order = (a, d) if (a.spd + a.initiative) >= (d.spd + d.initiative) else (d, a)
     rnd = 0
     max_rounds = None if max_rounds is None else max(1, int(max_rounds))
     cap = HARD_ROUND_CAP if max_rounds is None else max_rounds
     while rnd < cap:
         rnd += 1
+        damage_multiplier = _round_damage_multiplier(rnd, rules)
         for c in (a, d):
-            _tick_dots(c, log)
+            _tick_dots(c, log, damage_multiplier)
         if a.hp <= 0 or d.hp <= 0:
             break
         for actor in order:
             target = d if actor is a else a
             if actor.hp <= 0 or target.hp <= 0:
                 continue
-            _act(actor, target, rng, log)
+            _act(actor, target, rng, log, rules, rnd, damage_multiplier)
             if target.hp <= 0:
                 break
         for c in (a, d):
             c.mp = min(c.max_mp, c.mp + int(c.max_mp * MP_REGEN_PCT))
             _tick_cooldowns(c)
+        if a.hp > 0 and d.hp > 0:
+            _tick_pressure(a, d, rnd, rules)
         if a.hp <= 0 or d.hp <= 0:
             break
     winner = _decide(a, d)

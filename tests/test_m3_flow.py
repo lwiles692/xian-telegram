@@ -37,7 +37,7 @@ async def test_pvp_duel_updates_ratings_and_reward(temp_db):
 
 
 @pytest.mark.asyncio
-async def test_pvp_runs_past_round_limit_until_defeat(temp_db, monkeypatch):
+async def test_pvp_uses_duel_ban_and_resolves_slow_fights(temp_db, monkeypatch):
     a, b = 3231, 3232
     await character.create(a, "attacker")
     await character.create(b, "defender")
@@ -63,8 +63,11 @@ async def test_pvp_runs_past_round_limit_until_defeat(temp_db, monkeypatch):
     pairs = await db.fetchall("SELECT * FROM pvp_daily_pairs")
 
     assert res["status"] == "ok"
-    assert seen["max_rounds"] is None
+    assert seen["max_rounds"] == pvp.PVP_MAX_ROUNDS
+    assert seen["rules"] is pvp.PVP_COMBAT_RULES
     assert res["rounds"] > 30
+    assert res["rounds"] <= pvp.PVP_MAX_ROUNDS
+    assert res["finish_reason"] in ("defeat", "double_down")
     assert res["win"] in (True, False)
     assert res["rating_delta"] != 0
     assert res["reputation_gain"] in (pvp.WIN_REPUTATION, pvp.LOSS_REPUTATION)
