@@ -1,5 +1,6 @@
-"""角色服务：注册/读取/属性计算/储物袋。读取时惰性恢复精力并落库。"""
 from __future__ import annotations
+
+"""角色服务：注册/读取/属性计算/储物袋。读取时惰性恢复精力并落库。"""
 
 import json
 import random
@@ -23,6 +24,7 @@ SPIRIT_ROOTS = ["天灵根", "金灵根", "木灵根", "水灵根", "火灵根",
 ROOT_BONE_MIN = 40
 ROOT_BONE_MAX = 80
 AUTO_SECLUSION_IDLE_SECONDS = 3600
+_GAME_FLAG_CACHE: dict[tuple[int, str], str] = {}
 
 
 @dataclass
@@ -170,6 +172,92 @@ def _overflow_week(now: int) -> str:
     return time.strftime("%Y-%W", time.localtime(now))
 
 
+def clear_game_flag_cache():
+    """清空运行期 game_flags 缓存，供测试或运维热改后刷新。"""
+    _GAME_FLAG_CACHE.clear()
+
+
+async def _game_flag_conn(conn, key: str, default: str = "0") -> str:
+    cache_key = (db.generation(), key)
+    if cache_key in _GAME_FLAG_CACHE:
+        return _GAME_FLAG_CACHE[cache_key]
+    cur = await conn.execute("SELECT value FROM game_flags WHERE key=?", (key,))
+    row = await cur.fetchone()
+    await cur.close()
+    value = str(row["value"]) if row else str(default)
+    _GAME_FLAG_CACHE[cache_key] = value
+    return value
+
+
+async def _game_flag(key: str, default: str = "0") -> str:
+    cache_key = (db.generation(), key)
+    if cache_key in _GAME_FLAG_CACHE:
+        return _GAME_FLAG_CACHE[cache_key]
+    row = await db.fetchone("SELECT value FROM game_flags WHERE key=?", (key,))
+    value = str(row["value"]) if row else str(default)
+    _GAME_FLAG_CACHE[cache_key] = value
+    return value
+
+
+async def _overflow_grace_until_conn(conn) -> int:
+    raw = await _game_flag_conn(conn, db.GAME_FLAG_OVERFLOW_DEMOTE_GRACE_UNTIL, "0")
+    return max(0, int(raw or 0))
+
+
+async def overflow_grace_until() -> int:
+    raw = await _game_flag(db.GAME_FLAG_OVERFLOW_DEMOTE_GRACE_UNTIL, "0")
+    return max(0, int(raw or 0))
+
+
+def _pct(rate: float) -> str:
+    return f"{rate * 100:.0f}%"
+
+
+def _time_text(ts: int) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(int(ts)))
+
+
+def _overflow_status_payload(realm: int, stage: int, cultivation: int,
+                             now: int, grace_until: int) -> dict:
+    tier = settle.overflow_tier(realm, stage, now, grace_until)
+    cost = R.advance_cost(realm, stage) if tier != "none" else 0
+    if tier != "none" and int(cultivation or 0) < cost:
+        tier = "none"
+    rates = {
+        "full": (settle.DAOHANG_FULL_REALM_RATE, settle.ASCENSION_FULL_REALM_RATE),
+        "grace_full": (settle.DAOHANG_FULL_REALM_RATE, settle.ASCENSION_FULL_REALM_RATE),
+        "pre_cap": (settle.DAOHANG_PRE_CAP_RATE, 0.0),
+    }
+    if tier == "none":
+        return {"status": "none", "active": False, "label": "",
+                "daohang_rate": 0.0, "ascension_rate": 0.0, "grace_until": grace_until}
+    daohang_rate, ascension_rate = rates[tier]
+    if tier == "full":
+        label = f"顶点档（道行 {_pct(daohang_rate)} / 飞升点 {_pct(ascension_rate)}）"
+    elif tier == "grace_full":
+        label = (
+            f"宽限顶点档（道行 {_pct(daohang_rate)} / 飞升点 {_pct(ascension_rate)}，"
+            f"至 {_time_text(grace_until)}）"
+        )
+    else:
+        label = f"次顶点档（道行 {_pct(daohang_rate)} / 飞升点 0）"
+    return {"status": tier, "active": True, "label": label,
+            "daohang_rate": daohang_rate, "ascension_rate": ascension_rate,
+            "grace_until": grace_until}
+
+
+async def overflow_status(user_id: int, now: int = None) -> dict:
+    now = int(time.time()) if now is None else now
+    row = await db.fetchone(
+        "SELECT realm, stage, cultivation FROM characters WHERE user_id=?",
+        (user_id,))
+    if not row:
+        return {"status": "missing", "active": False}
+    return _overflow_status_payload(
+        row["realm"], row["stage"], row["cultivation"], now,
+        await overflow_grace_until())
+
+
 async def _cap_overflow_daohang(conn, user_id: int, raw: int, now: int) -> int:
     """溢出转道行受周上限约束，返回本次实际可入账的道行（已扣减本周已用额度）。
 
@@ -285,8 +373,10 @@ async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
                     activity_windows=windows,
                     active_factor=activity.SECLUSION_ACTIVE_FACTOR)
                 _set_seclusion_remainder(state, row["realm"], row["stage"], remainder)
+                grace_until = await _overflow_grace_until_conn(conn)
                 new_cult, daohang, asc_pts = settle.overflow_split(
-                    row["realm"], row["stage"], row["cultivation"], auto_gain)
+                    row["realm"], row["stage"], row["cultivation"], auto_gain,
+                    now=now, grace_until=grace_until)
                 daohang = await _cap_overflow_daohang(conn, user_id, daohang, now)
                 await _add_daohang_event(conn, user_id, daohang, "overflow", now)
                 if asc_pts:
@@ -910,8 +1000,10 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
             activity_windows=windows,
             active_factor=activity.SECLUSION_ACTIVE_FACTOR)
         _set_seclusion_remainder(state, row["realm"], row["stage"], remainder_units)
+        grace_until = await _overflow_grace_until_conn(conn)
         new_cult, daohang, asc_pts = settle.overflow_split(
-            row["realm"], row["stage"], row["cultivation"], gained)
+            row["realm"], row["stage"], row["cultivation"], gained,
+            now=now, grace_until=grace_until)
         daohang = await _cap_overflow_daohang(conn, user_id, daohang, now)
         await _add_daohang_event(conn, user_id, daohang, "overflow", now)
         if asc_pts:
@@ -922,10 +1014,13 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
             "WHERE user_id=?",
             (new_cult, daohang, stamina, stamina_at, json.dumps(state, ensure_ascii=False), user_id))
         cost = R.advance_cost(row["realm"], row["stage"])
+        overflow = _overflow_status_payload(
+            row["realm"], row["stage"], new_cult, now, grace_until)
         return {"status": "collected", "gained": gained, "daohang": daohang,
                 "ascension": asc_pts, "cultivation": new_cult,
                 "cost": cost, "can_advance": new_cult >= cost,
-                "minutes": max(0, (now - row["seclusion_at"]) // 60)}
+                "minutes": max(0, (now - row["seclusion_at"]) // 60),
+                "overflow": overflow}
 
 
 async def _grant_reward_conn(conn, user_id: int, stone: int = 0,
@@ -943,8 +1038,10 @@ async def _grant_reward_conn(conn, user_id: int, stone: int = 0,
         await cur.close()
         if row:
             now = int(time.time())
+            grace_until = await _overflow_grace_until_conn(conn)
             new_cult, daohang, asc_pts = settle.overflow_split(
-                row["realm"], row["stage"], int(row["cultivation"] or 0), cultivation)
+                row["realm"], row["stage"], int(row["cultivation"] or 0), cultivation,
+                now=now, grace_until=grace_until)
             daohang = await _cap_overflow_daohang(conn, user_id, daohang, now)
             await conn.execute(
                 "UPDATE characters SET cultivation=?, daohang=daohang+? WHERE user_id=?",

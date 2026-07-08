@@ -1,5 +1,6 @@
-"""/cultivate —— 闭关 / 出关；以及突破回调 bt:do。"""
 from __future__ import annotations
+
+"""/cultivate —— 闭关 / 出关；以及突破回调 bt:do。"""
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -24,6 +25,11 @@ async def do_cultivate(user_id: int):
             return "闭关状态已变，请稍后再试。", section_back_markup("↩️ 返回闭关", "nav:cultivate")
         lines = [f"🧘 出关！闭关 {res['minutes']} 分钟，修为精进 +{res['gained']}。",
                  f"修为 {res['cultivation']}/{res['cost']}"]
+        if res.get("daohang") or res.get("ascension"):
+            lines.append(f"溢出所得：道行+{res.get('daohang', 0)}，飞升点+{res.get('ascension', 0)}")
+        overflow = res.get("overflow") or {}
+        if overflow.get("active"):
+            lines.append(f"溢出分流：{overflow['label']}")
         if res["can_advance"]:
             lines.append("✨ 修为已足，可尝试突破！")
         return "\n".join(lines), await menu_with_breakthrough(user_id, res["can_advance"])

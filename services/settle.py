@@ -1,5 +1,6 @@
-"""惰性结算：精力恢复、闭关修为。纯函数，便于单测（spec §4）。"""
 from __future__ import annotations
+
+"""惰性结算：精力恢复、闭关修为。纯函数，便于单测（spec §4）。"""
 
 from config import realms as R
 
@@ -25,11 +26,25 @@ OVERFLOW_DAOHANG_WEEKLY_CAP = 600
 ASCENSION_FULL_REALM_RATE = 0.20
 
 
-def overflow_split(realm: int, stage: int, cur_cult: int, gain: int) -> tuple[int, int, int]:
+def overflow_tier(realm: int, stage: int, now: int = None,
+                  grace_until: int = 0) -> str:
+    """返回当前溢出分流档位：full / grace_full / pre_cap / none。"""
+    if realm == len(R.REALM_NAMES) - 1 and stage == R.num_stages(realm) - 1:
+        return "full"
+    if realm == len(R.REALM_NAMES) - 2 and stage == R.num_stages(realm) - 1:
+        if now is not None and int(grace_until or 0) > int(now):
+            return "grace_full"
+        return "pre_cap"
+    return "none"
+
+
+def overflow_split(realm: int, stage: int, cur_cult: int, gain: int,
+                   now: int = None, grace_until: int = 0) -> tuple[int, int, int]:
     """满级/准满级溢出修为分流，返回 (保留修为, 道行, 飞升点)。
 
     - 当前最高大境界圆满：cultivation 封顶 advance_cost；越界 ×DAOHANG_FULL_REALM_RATE(0.08)→道行、
       ×ASCENSION_FULL_REALM_RATE(0.20)→飞升点。
+    - 最高境界前一档圆满且仍在宽限期：临时按当前最高大境界圆满完整分流。
     - 最高境界前一档圆满且修为已满：越界 ×DAOHANG_PRE_CAP_RATE(0.03)→道行，不产飞升点。
     - 其它：原样累加，无转换。
 
@@ -38,12 +53,13 @@ def overflow_split(realm: int, stage: int, cur_cult: int, gain: int) -> tuple[in
     cur_cult = max(0, int(cur_cult))
     gain = max(0, int(gain))
     total = cur_cult + gain
-    if realm == len(R.REALM_NAMES) - 1 and stage == R.num_stages(realm) - 1:
+    tier = overflow_tier(realm, stage, now, grace_until)
+    if tier in {"full", "grace_full"}:
         cap = R.advance_cost(realm, stage)
         overflow = max(0, total - cap)
         return (min(total, cap), int(overflow * DAOHANG_FULL_REALM_RATE),
                 int(overflow * ASCENSION_FULL_REALM_RATE))
-    if realm == len(R.REALM_NAMES) - 2 and stage == R.num_stages(realm) - 1:
+    if tier == "pre_cap":
         cap = R.advance_cost(realm, stage)
         if cur_cult >= cap:
             overflow = max(0, total - cap)
@@ -51,12 +67,13 @@ def overflow_split(realm: int, stage: int, cur_cult: int, gain: int) -> tuple[in
     return total, 0, 0
 
 
-def overflow_to_daohang(realm: int, stage: int, cur_cult: int, gain: int) -> tuple[int, int]:
+def overflow_to_daohang(realm: int, stage: int, cur_cult: int, gain: int,
+                        now: int = None, grace_until: int = 0) -> tuple[int, int]:
     """满级/准满级溢出修为转道行，返回 (保留修为, 获得道行)。
 
     兼容包装：等价于 overflow_split 的前两元（不含飞升点）。新代码应直接用 overflow_split。
     """
-    kept, daohang, _ = overflow_split(realm, stage, cur_cult, gain)
+    kept, daohang, _ = overflow_split(realm, stage, cur_cult, gain, now, grace_until)
     return kept, daohang
 
 

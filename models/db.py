@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """SQLite 访问层：单连接 + WAL + 写串行化（spec §13/§14）。
 
 约定（供后续模块复用）：
@@ -5,10 +7,10 @@
 - 写用 ``execute`` / ``executemany``（经 ``_write_lock`` 串行化，护灵石/库存等）。
 - schema 启动时幂等建表。
 """
-from __future__ import annotations
 
 import asyncio
 import os
+import time
 from contextlib import asynccontextmanager
 
 import aiosqlite
@@ -17,6 +19,10 @@ _DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "xia
 _conn = None          # 写连接：事务 / 写入，经 _write_lock 串行化
 _read_conn = None     # 只读连接：WAL 快照读，永不取写锁，杜绝脏读与读-写死锁
 _write_lock = None
+_generation = 0
+
+GAME_FLAG_OVERFLOW_DEMOTE_GRACE_UNTIL = "overflow_demote_grace_until"
+OVERFLOW_DEMOTE_GRACE_SECONDS = 28 * 24 * 3600
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -24,6 +30,10 @@ CREATE TABLE IF NOT EXISTS users (
     username    TEXT,
     created_at  INTEGER NOT NULL,
     last_seen_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS game_flags (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS characters (
     user_id       INTEGER PRIMARY KEY,
@@ -364,7 +374,7 @@ ON market_trades(created_at, seller_id, buyer_id);
 
 
 async def init_db(path: str = None):
-    global _conn, _read_conn, _write_lock
+    global _conn, _read_conn, _write_lock, _generation
     db_path = path or _DB_PATH
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     if _conn is not None:
@@ -376,6 +386,11 @@ async def init_db(path: str = None):
     _write_lock = asyncio.Lock()
     await _conn.execute("PRAGMA journal_mode=WAL;")
     await _conn.executescript(SCHEMA)
+    await _ensure_game_flag(
+        _conn,
+        GAME_FLAG_OVERFLOW_DEMOTE_GRACE_UNTIL,
+        str(int(time.time()) + OVERFLOW_DEMOTE_GRACE_SECONDS),
+    )
     await _ensure_column(_conn, "users", "last_seen_at", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "alchemy_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "forge_prof", "INTEGER NOT NULL DEFAULT 0")
@@ -431,6 +446,7 @@ async def init_db(path: str = None):
     _read_conn = await aiosqlite.connect(db_path)
     _read_conn.row_factory = aiosqlite.Row
     await _read_conn.execute("PRAGMA query_only=ON;")
+    _generation += 1
 
 
 async def close_db():
@@ -457,6 +473,17 @@ def _rc():
 def _lock():
     assert _write_lock is not None, "DB 未初始化，请先 await init_db()"
     return _write_lock
+
+
+def generation() -> int:
+    """当前 DB 初始化代次；服务层缓存据此避开跨测试库串值。"""
+    return _generation
+
+
+async def _ensure_game_flag(conn, key: str, value: str):
+    await conn.execute(
+        "INSERT OR IGNORE INTO game_flags(key, value) VALUES(?,?)",
+        (key, value))
 
 
 async def _ensure_column(conn, table: str, column: str, definition: str):
