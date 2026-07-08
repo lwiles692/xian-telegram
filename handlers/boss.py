@@ -55,6 +55,8 @@ def _challenge_text(res: dict) -> str:
             "—— 伤害榜 ——",
             *_leader_lines(res["leaderboard"]),
         ]
+        if res.get("daohang"):
+            lines.append(f"道行 +{res['daohang']}。")
         if res["defeated"]:
             lines.append(world_boss.reward_text(res["rewards"]))
         return "\n".join(line for line in lines if line)

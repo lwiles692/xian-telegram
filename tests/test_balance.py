@@ -358,6 +358,16 @@ def test_activity_daohang_capped():
     assert prof["runs_to_cap"] >= 1
 
 
+def test_regular_daohang_sources_do_not_bypass_activity_cap():
+    """#45：常规道行来源为小额补给，共用周上限且低于活动副本上限。"""
+    prof = B.regular_daohang_profile()
+    assert prof["unlock_realm"] == 3
+    assert prof["under_activity_cap"] is True
+    assert prof["weekly_cap"] <= B.activity_daohang_profile()["weekly_cap"]
+    assert prof["max_explore"] < prof["weekly_cap"]
+    assert prof["max_dungeon"] < prof["weekly_cap"]
+
+
 def test_ascension_passive_within_clamp_and_nontradeable():
     """飞升被动增益受 §6.3 clamp；飞升点非物品、不可交易。"""
     guard = B.ascension_arbitrage_guard()

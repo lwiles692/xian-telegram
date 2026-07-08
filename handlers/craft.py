@@ -25,6 +25,13 @@ _CAT_TITLE = {cat: title for cat, title, _ in CRAFT_CATEGORIES}
 _CAT_ICON = {"alchemy": "💊", "forge": "⚒️"}
 
 
+def _collected_text(item: dict) -> str:
+    text = f"{item['name']}×{item.get('qty', 1)}"
+    if item.get("daohang"):
+        text += f"（道行+{item['daohang']}）"
+    return text
+
+
 def _duration(seconds: int) -> str:
     seconds = max(0, int(seconds))
     if seconds < 60:
@@ -44,8 +51,7 @@ async def render_craft(user_id: int):
     active = await crafting.active_job(user_id)
     lines = ["💊 炼丹炼器"]
     if collected:
-        lines.append("出炉：" + "、".join(
-            f"{c['name']}×{c.get('qty', 1)}" for c in collected))
+        lines.append("出炉：" + "、".join(_collected_text(c) for c in collected))
     rows = []
     if active:
         recipe = RECIPES[active["recipe_key"]]
@@ -117,7 +123,7 @@ def _result_text(res: dict) -> str:
         parts = [f"{item_name(m['item'])}：需 {m['need']}，现有 {m['have']}" for m in res["missing"]]
         return "材料不足：\n" + "\n".join(parts)
     if s == "accelerated":
-        names = "、".join(c["name"] for c in res["collected"]) or "炉火已催至将成"
+        names = "、".join(_collected_text(c) for c in res["collected"]) or "炉火已催至将成"
         if res.get("cost", 0) <= 0:
             return f"炉火已成，{names}。"
         return f"消耗灵石 {res['cost']} 加速，{names}。"

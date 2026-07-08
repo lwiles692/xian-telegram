@@ -14,6 +14,7 @@ import random
 
 from config import realms as R
 from config import buffs as BUFFS
+from config import daohang as DAOHANG_CFG
 from config import dao_paths as DAO
 from config.ascension import PASSIVE_CAP, PASSIVES
 from config.bosses import WORLD_BOSSES
@@ -322,6 +323,25 @@ def activity_daohang_profile() -> dict:
     }
 
 
+def regular_daohang_profile() -> dict:
+    """#45 常规玩法道行限流：小额来源共用周上限，不能越过活动副本定位。"""
+    max_explore = max(DAOHANG_CFG.EXPLORE_DAOHANG_BY_DIFFICULTY.values()) + DAOHANG_CFG.EXPLORE_BOSS_BONUS
+    max_dungeon = max(
+        d["layers"] * DAOHANG_CFG.DUNGEON_DAOHANG_PER_LAYER + DAOHANG_CFG.DUNGEON_CLEAR_BONUS
+        for d in DUNGEONS.values())
+    max_boss_rank = max(DAOHANG_CFG.WORLD_BOSS_RANK_DAOHANG)
+    max_pvp_rank = max(DAOHANG_CFG.PVP_WEEKLY_DAOHANG_BY_RANK)
+    return {
+        "unlock_realm": DAOHANG_CFG.UNLOCK_REALM,
+        "weekly_cap": DAOHANG_CFG.REGULAR_WEEKLY_CAP,
+        "max_explore": max_explore,
+        "max_dungeon": max_dungeon,
+        "max_boss_rank": max_boss_rank,
+        "max_pvp_rank": max_pvp_rank,
+        "under_activity_cap": DAOHANG_CFG.REGULAR_WEEKLY_CAP <= WEEKLY_DAOHANG_CAP,
+    }
+
+
 # 飞升点为账号级数值，非物品（不在 ITEMS/SHOP，天然不可交易）。
 _ASCENSION_TRADEABLE_KEYS = ("飞升点",)
 
@@ -450,6 +470,10 @@ def report() -> None:
     act = activity_daohang_profile()
     print(f"  活动道行限流: 周上限{act['weekly_cap']} 单次{act['per_run']}/精力{act['stamina_per_run']} "
           f"满档需{act['runs_to_cap']}次 {'✅有上限' if act['capped'] else '⚠️无上限'}")
+    reg = regular_daohang_profile()
+    print(f"  常规道行限流: 元婴起 周上限{reg['weekly_cap']} "
+          f"历练单次≤{reg['max_explore']} 秘境单次≤{reg['max_dungeon']} "
+          f"{'✅低于活动上限' if reg['under_activity_cap'] else '⚠️高于活动上限'}")
     asc = ascension_arbitrage_guard()
     print(f"  飞升点护栏: 被动上限{asc['passive_cap']}级(+{asc['max_single_pct']*100:.0f}%) "
           f"{'✅受clamp' if asc['within_clamp'] else '⚠️破clamp'} "

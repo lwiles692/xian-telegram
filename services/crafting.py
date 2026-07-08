@@ -5,6 +5,7 @@ import json
 import random
 import time
 
+from config import daohang as DAOHANG
 from config.items import ITEMS, item_name
 from config.recipes import ACCELERATE_STONE_PER_MINUTE, RECIPES
 from models import db
@@ -80,6 +81,7 @@ async def collect_ready(user_id: int, now: int = None) -> list:
         for job in jobs:
             recipe = RECIPES[job["recipe_key"]]
             output = recipe["output"]
+            entry = {}
             if output["kind"] == "equipment":
                 base_key = output["key"]
                 item = ITEMS[base_key]
@@ -91,17 +93,23 @@ async def collect_ready(user_id: int, now: int = None) -> list:
                     "VALUES(?,?,?,?)",
                     (user_id, base_key, item.get("tier", "凡"),
                      json.dumps(affixes, ensure_ascii=False)))
-                collected.append({"kind": "equipment", "name": item_name(base_key)})
+                entry = {"kind": "equipment", "name": item_name(base_key)}
             else:
                 await conn.execute(
                     "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
                     "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + ?",
                     (user_id, output["key"], output["qty"], output["qty"]))
-                collected.append({"kind": "item", "name": item_name(output["key"]), "qty": output["qty"]})
+                entry = {"kind": "item", "name": item_name(output["key"]), "qty": output["qty"]}
             column = "alchemy_prof" if recipe["type"] == "alchemy" else "forge_prof"
             await conn.execute(
                 f"UPDATE characters SET {column} = {column} + 1 WHERE user_id=?",
                 (user_id,))
+            daohang = await character.grant_regular_daohang_conn(
+                conn, user_id, DAOHANG.CRAFT_DAOHANG_BY_TYPE.get(recipe["type"], 0),
+                "craft_regular", now, realm=char["realm"])
+            if daohang:
+                entry["daohang"] = daohang
+            collected.append(entry)
             await conn.execute("UPDATE crafting_jobs SET status='done' WHERE id=?", (job["id"],))
             await game_events.emit_conn(
                 conn, user_id, "craft.done",

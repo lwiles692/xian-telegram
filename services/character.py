@@ -6,6 +6,7 @@ import random
 import time
 from dataclasses import dataclass
 
+from config import daohang as DAOHANG
 from config import realms as R
 from config import buffs as BUFFS
 from config.items import ITEMS, equipment_slot, item_name, weapon_bonus
@@ -192,6 +193,59 @@ async def _cap_overflow_daohang(conn, user_id: int, raw: int, now: int) -> int:
         "ON CONFLICT(user_id, week) DO UPDATE SET overflow_daohang=overflow_daohang+?",
         (user_id, week, grant, grant))
     return grant
+
+
+async def _cap_regular_daohang(conn, user_id: int, raw: int, now: int) -> int:
+    """#45 常规道行来源共用周上限，防历练/秘境等日常行为绕成无限水管。"""
+    if raw <= 0:
+        return 0
+    week = _overflow_week(now)
+    cur = await conn.execute(
+        "SELECT regular_daohang FROM weekly_activity WHERE user_id=? AND week=?",
+        (user_id, week))
+    row = await cur.fetchone()
+    await cur.close()
+    used = row["regular_daohang"] if row else 0
+    grant = max(0, min(int(raw), DAOHANG.REGULAR_WEEKLY_CAP - used))
+    if grant <= 0:
+        return 0
+    await conn.execute(
+        "INSERT INTO weekly_activity(user_id, week, regular_daohang) VALUES(?,?,?) "
+        "ON CONFLICT(user_id, week) DO UPDATE SET regular_daohang=regular_daohang+?",
+        (user_id, week, grant, grant))
+    return grant
+
+
+async def grant_regular_daohang_conn(conn, user_id: int, amount: int, event_type: str,
+                                     now: int = None, realm: int = None) -> int:
+    """给元婴及以上常规玩法发少量道行，并写 path_events（spec-v2 §4.3，#45）。"""
+    now = int(time.time()) if now is None else now
+    amount = int(amount or 0)
+    if amount <= 0:
+        return 0
+    if realm is None:
+        cur = await conn.execute("SELECT realm FROM characters WHERE user_id=?", (user_id,))
+        row = await cur.fetchone()
+        await cur.close()
+        if not row:
+            return 0
+        realm = row["realm"]
+    if int(realm) < DAOHANG.UNLOCK_REALM:
+        return 0
+    grant = await _cap_regular_daohang(conn, user_id, amount, now)
+    if grant <= 0:
+        return 0
+    await conn.execute(
+        "UPDATE characters SET daohang=daohang+? WHERE user_id=?",
+        (grant, user_id))
+    await _add_daohang_event(conn, user_id, grant, event_type, now)
+    return grant
+
+
+async def grant_regular_daohang(user_id: int, amount: int, event_type: str,
+                                now: int = None, realm: int = None) -> int:
+    async with db.transaction() as conn:
+        return await grant_regular_daohang_conn(conn, user_id, amount, event_type, now, realm)
 
 
 async def touch_activity(user_id: int, username: str, now: int = None) -> dict:

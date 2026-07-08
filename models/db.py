@@ -300,6 +300,7 @@ CREATE TABLE IF NOT EXISTS weekly_activity (
     week        TEXT NOT NULL,
     runs        INTEGER NOT NULL DEFAULT 0,
     daohang     INTEGER NOT NULL DEFAULT 0,
+    regular_daohang INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, week)
 );
 CREATE TABLE IF NOT EXISTS sect_outposts (
@@ -390,6 +391,8 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "daohang", "INTEGER NOT NULL DEFAULT 0")
     # 溢出转道行的每周入账计量（周上限兜底，防满级挂机无限刷道行）。
     await _ensure_column(_conn, "weekly_activity", "overflow_daohang", "INTEGER NOT NULL DEFAULT 0")
+    # 常规玩法道行的每周入账计量（#45）：历练/秘境/Boss/炼制/宗门/PvP 共用小额上限。
+    await _ensure_column(_conn, "weekly_activity", "regular_daohang", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "world_boss", "message_id", "INTEGER")
     await _ensure_column(_conn, "world_boss", "cultivator_count", "INTEGER NOT NULL DEFAULT 1")
     await _ensure_column(_conn, "pvp_ratings", "reputation", "INTEGER NOT NULL DEFAULT 0")

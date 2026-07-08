@@ -4,6 +4,7 @@ from __future__ import annotations
 import random
 import time
 
+from config import daohang as DAOHANG
 from config.events import ENCOUNTER_RATE, ENCOUNTERS
 from config.maps import MAPS
 from config.realms import realm_label
@@ -58,6 +59,11 @@ def _roll_drops(m, rng, drop_bonus: float = 0.0) -> dict:
         if rng.random() < min(100.0, weight * (1 + drop_bonus)) / 100.0:
             drops[key] = drops.get(key, 0) + rng.randint(qmin, qmax)
     return drops
+
+
+def _regular_daohang_reward(m: dict, is_boss: bool) -> int:
+    base = DAOHANG.EXPLORE_DAOHANG_BY_DIFFICULTY.get(m.get("difficulty", "易"), 0)
+    return base + (DAOHANG.EXPLORE_BOSS_BONUS if is_boss else 0)
 
 
 def _combatant_from_mob(src) -> Combatant:
@@ -415,7 +421,7 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
             break
         player.hp = max(1, result["a_hp"])
 
-    reward = {"stone": 0, "cult": 0, "drops": {}}
+    reward = {"stone": 0, "cult": 0, "drops": {}, "daohang": 0}
     if win:
         mult = 2 if is_boss else 1
         reward_mult = float(event_effect.get("reward_mult", 1.0) or 1.0)
@@ -425,8 +431,12 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
         outpost = await sect_war.bonuses_for_user(user_id)
         drop_pct = sect_war.total_drop_pct(welfare["drop_pct"], outpost)
         drops = _roll_drops(m, rng, drop_pct + float(event_effect.get("drop_bonus", 0.0) or 0.0))
+        daohang = 0
         if conn is not None:
             await character._grant_reward_conn(conn, user_id, stone, cult, drops)
+            daohang = await character.grant_regular_daohang_conn(
+                conn, user_id, _regular_daohang_reward(m, is_boss),
+                "explore_regular", now, realm=char.realm)
             contribution = int(event_effect.get("contribution", 0) or 0)
             if contribution:
                 await conn.execute(
@@ -434,7 +444,10 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
                     (contribution, user_id))
         else:
             await character.grant_reward(user_id, stone, cult, drops)
-        reward = {"stone": stone, "cult": cult, "drops": drops}
+            daohang = await character.grant_regular_daohang(
+                user_id, _regular_daohang_reward(m, is_boss),
+                "explore_regular", now, realm=char.realm)
+        reward = {"stone": stone, "cult": cult, "drops": drops, "daohang": daohang}
 
     # 严格事件顺序（#24 P1）：先得「战斗结束状态」(finish_at，落 20% 重伤地板)，
     # 再从该状态自然回复到领取时刻 now。领取前已禁服恢复丹，故无需合并。

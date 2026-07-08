@@ -4,6 +4,7 @@ from __future__ import annotations
 import random
 import time
 
+from config import daohang as DAOHANG
 from config import realms as R
 from config.dungeons import DUNGEONS
 from config.items import ITEMS, item_name
@@ -36,6 +37,13 @@ def _uniform(rng, low: float, high: float) -> float:
     if hasattr(rng, "uniform"):
         return rng.uniform(low, high)
     return low + (high - low) * rng.random()
+
+
+def _regular_daohang_reward(cleared: int, layers: int) -> int:
+    reward = max(0, int(cleared)) * DAOHANG.DUNGEON_DAOHANG_PER_LAYER
+    if layers and cleared >= layers:
+        reward += DAOHANG.DUNGEON_CLEAR_BONUS
+    return reward
 
 
 def _run_status(row, now: int) -> dict:
@@ -208,6 +216,7 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
 
     stack_drops = {}
     equipment_drops = []
+    daohang = 0
     if cleared:
         reward_factor = _uniform(rng, 4.0, 6.0) * (cleared / d["layers"])
         welfare = await character.sect_welfare(user_id)
@@ -227,8 +236,14 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
         cult = int(d["cult"] * reward_factor)
         if conn is not None:
             await character._grant_reward_conn(conn, user_id, stone, cult, stack_drops)
+            daohang = await character.grant_regular_daohang_conn(
+                conn, user_id, _regular_daohang_reward(cleared, d["layers"]),
+                "dungeon_regular", now, realm=char.realm)
         else:
             await character.grant_reward(user_id, stone, cult, stack_drops)
+            daohang = await character.grant_regular_daohang(
+                user_id, _regular_daohang_reward(cleared, d["layers"]),
+                "dungeon_regular", now, realm=char.realm)
     else:
         stone = cult = 0
 
@@ -252,7 +267,7 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
             "cleared": cleared, "layers": d["layers"],
             "win": cleared == d["layers"], "defeat_reason": defeat_reason, "log": logs,
             "reward": {"stone": stone, "cult": cult, "drops": stack_drops,
-                       "equipment": equipment_drops},
+                       "equipment": equipment_drops, "daohang": daohang},
             "stamina_left": char.stamina,
             # 战斗快照（出发→战斗末，解释胜负）与领取后当前状态（落库）分开展示（#24 P2）。
             "battle_hp_before": cur_hp, "battle_hp_after": max(0, player.hp),
