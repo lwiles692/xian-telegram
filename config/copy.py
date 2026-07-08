@@ -1,11 +1,15 @@
-"""文案与 emoji —— 半文半白·正经仙侠。集中此处便于统一口吻。"""
 from __future__ import annotations
+
+"""文案与 emoji —— 半文半白·正经仙侠。集中此处便于统一口吻。"""
 
 E = {
     "sword": "⚔️", "pill": "💊", "stone": "🪙", "skill": "📖",
     "treasure": "🔮", "cultivate": "🧘", "boss": "🐲", "up": "📈",
     "bag": "🎒", "guide": "📜",
 }
+
+VERSION_NOTICE_TITLE = "📣 【三期·炼虚开放公告】"
+OVERFLOW_NOTICE_TITLE = "🌌 【炼虚溢出分流】"
 
 HELP = (
     "📜 【问道·指南】\n"
@@ -24,5 +28,5 @@ HELP = (
     "/daily — 每日签到\n"
     "/bag — 查看储物袋\n"
     "/help — 重览此卷\n\n"
-    "大道三千，愿道友早证金丹。"
+    "大道三千，愿道友早证长生。"
 )

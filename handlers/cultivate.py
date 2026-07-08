@@ -15,6 +15,21 @@ from services import breakthrough, character, cultivation
 router = Router()
 
 
+def _collect_text(res: dict) -> str:
+    lines = [f"🧘 出关！闭关 {res['minutes']} 分钟，修为精进 +{res['gained']}。",
+             f"修为 {res['cultivation']}/{res['cost']}"]
+    if res.get("daohang") or res.get("ascension"):
+        lines.append(f"溢出所得：道行+{res.get('daohang', 0)}，飞升点+{res.get('ascension', 0)}")
+    overflow = res.get("overflow") or {}
+    if overflow.get("active"):
+        lines.append(f"溢出分流：{overflow['label']}")
+    if res.get("overflow_notice"):
+        lines.append(res["overflow_notice"])
+    if res["can_advance"]:
+        lines.append("✨ 修为已足，可尝试突破！")
+    return "\n".join(lines)
+
+
 async def do_cultivate(user_id: int):
     char = await character.get(user_id)
     if not char:
@@ -23,16 +38,7 @@ async def do_cultivate(user_id: int):
         res = await cultivation.collect(user_id)
         if res["status"] != "collected":
             return "闭关状态已变，请稍后再试。", section_back_markup("↩️ 返回闭关", "nav:cultivate")
-        lines = [f"🧘 出关！闭关 {res['minutes']} 分钟，修为精进 +{res['gained']}。",
-                 f"修为 {res['cultivation']}/{res['cost']}"]
-        if res.get("daohang") or res.get("ascension"):
-            lines.append(f"溢出所得：道行+{res.get('daohang', 0)}，飞升点+{res.get('ascension', 0)}")
-        overflow = res.get("overflow") or {}
-        if overflow.get("active"):
-            lines.append(f"溢出分流：{overflow['label']}")
-        if res["can_advance"]:
-            lines.append("✨ 修为已足，可尝试突破！")
-        return "\n".join(lines), await menu_with_breakthrough(user_id, res["can_advance"])
+        return _collect_text(res), await menu_with_breakthrough(user_id, res["can_advance"])
     res = await cultivation.start(user_id)
     if res["status"] == "busy_explore":
         return "道友正在外历练，须归来后方可闭关。", section_back_markup("↩️ 返回闭关", "nav:cultivate")

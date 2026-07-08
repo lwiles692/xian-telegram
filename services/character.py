@@ -217,6 +217,18 @@ def _time_text(ts: int) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(int(ts)))
 
 
+def overflow_grace_notice_text(grace_until: int) -> str:
+    return (
+        f"宽限截止日期：{_time_text(grace_until)}。\n"
+        "降档后档位：化神圆满未突破者为次顶点档（3% 道行 / 0 飞升点）。\n"
+        "突破炼虚并修至炼虚圆满，可恢复完整分流（8% 道行 / 20% 飞升点）。"
+    )
+
+
+async def overflow_grace_notice() -> str:
+    return overflow_grace_notice_text(await overflow_grace_until())
+
+
 def _overflow_status_payload(realm: int, stage: int, cultivation: int,
                              now: int, grace_until: int) -> dict:
     tier = settle.overflow_tier(realm, stage, now, grace_until)
@@ -1020,7 +1032,8 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
                 "ascension": asc_pts, "cultivation": new_cult,
                 "cost": cost, "can_advance": new_cult >= cost,
                 "minutes": max(0, (now - row["seclusion_at"]) // 60),
-                "overflow": overflow}
+                "overflow": overflow,
+                "overflow_notice": overflow_grace_notice_text(grace_until) if overflow["active"] else ""}
 
 
 async def _grant_reward_conn(conn, user_id: int, stone: int = 0,

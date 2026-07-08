@@ -17,6 +17,15 @@ async def _set_overflow_grace_until(ts: int):
     character.clear_game_flag_cache()
 
 
+def _assert_overflow_notice(text: str, grace_until: int):
+    assert "宽限截止日期" in text
+    assert time.strftime("%Y-%m-%d", time.localtime(grace_until)) in text
+    assert "降档后档位" in text
+    assert "3% 道行 / 0 飞升点" in text
+    assert "突破炼虚" in text
+    assert "恢复完整分流" in text
+
+
 @pytest_asyncio.fixture
 async def temp_db(tmp_path):
     await db.init_db(str(tmp_path / "daohang.db"))
@@ -234,6 +243,31 @@ async def test_game_flags_init_is_idempotent(tmp_path):
         (db.GAME_FLAG_OVERFLOW_DEMOTE_GRACE_UNTIL,))
     assert again["value"] == "12345"
     await db.close_db()
+
+
+@pytest.mark.asyncio
+async def test_overflow_notice_three_surfaces_include_deadline_and_recovery(temp_db):
+    from handlers import cultivate as cultivate_handler
+    from handlers import help as help_handler
+
+    uid = 9408
+    cost = R.advance_cost(4, 3)
+    grace_until = 2_000_000_000
+    await character.create(uid, "notice")
+    await character.set_progress(uid, 4, 3, cost)
+    await db.execute("UPDATE characters SET root_bone=0 WHERE user_id=?", (uid,))
+    await _set_overflow_grace_until(grace_until)
+
+    version_notice = await help_handler.render_version_notice()
+    help_text = await help_handler.render_help()
+    await character.start_seclusion(uid, now=1000)
+    res = await character.collect_seclusion(uid, now=1000 + 1800)
+    collect_text = cultivate_handler._collect_text(res)
+
+    assert "三期·炼虚开放公告" in version_notice
+    assert "炼虚溢出分流" in help_text
+    for text in (version_notice, help_text, collect_text):
+        _assert_overflow_notice(text, grace_until)
 
 
 @pytest.mark.asyncio
