@@ -38,6 +38,8 @@ ITEMS = {
     "元婴丹": {"name": "元婴丹",   "type": "pill", "sell": 500},
     "化神丹": {"name": "化神丹",   "type": "pill", "sell": 700},
     "化神丹残方": {"name": "化神丹残方", "type": "material", "sell": 90},
+    "炼虚丹": {"name": "炼虚丹",   "type": "pill", "sell": 900},
+    "炼虚丹残方": {"name": "炼虚丹残方", "type": "material", "sell": 120},
     "星陨砂": {"name": "星陨砂", "type": "material", "sell": 85},
     "幽都魂晶": {"name": "幽都魂晶", "type": "material", "sell": 95},
     "天外残玉": {"name": "天外残玉", "type": "material", "sell": 110},
@@ -67,6 +69,7 @@ ITEMS = {
     "幽都铃": {"name": "幽都铃", "type": "equipment", "slot": "accessory",
              "tier": "玄", "bonus": {"mp": 540, "spd": 50}, "breakthrough_rate": 0.035},
     "化神丹方": {"name": "化神丹方", "type": "recipe", "recipe": "huashen_pill"},
+    "炼虚丹方": {"name": "炼虚丹方", "type": "recipe", "recipe": "lianxu_pill"},
     "天魔刃图纸": {"name": "天魔刃图纸", "type": "recipe", "recipe": "forge_yuanying_blade"},
     "战魂甲图纸": {"name": "战魂甲图纸", "type": "recipe", "recipe": "forge_yuanying_armor"},
     "古战佩图纸": {"name": "古战佩图纸", "type": "recipe", "recipe": "forge_yuanying_accessory"},
@@ -86,9 +89,9 @@ ITEMS = {
 }
 
 
-# 禁止玩家坊市交易的物品（spec §3.4 化神丹不直售；§7.1/T5.4 转修令/保命符默认绑定）。
+# 禁止玩家坊市交易的物品（spec §3.4 化神丹/炼虚丹不直售；§7.1/T5.4 转修令/保命符默认绑定）。
 # 掉落即以 bound=0 进包，但这些关键材料不得经坊市绕过 NPC 直售 / 转修成本 / 绑定语义。
-NO_TRADE = frozenset({"转修令", "化神丹", "保命符"})
+NO_TRADE = frozenset({"转修令", "化神丹", "炼虚丹", "保命符"})
 
 
 def is_tradable(key: str) -> bool:

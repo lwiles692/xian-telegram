@@ -109,6 +109,12 @@ RECIPES = {
         "stone": 1500, "materials": {"化神丹残方": 6, "妖丹": 4},
         "output": {"kind": "item", "key": "化神丹", "qty": 1}, "default": False,
     },
+    # spec-v3 §3.4：炼虚丹残方四合一保底，产物绑定，避免坊市绕过首破管线。
+    "lianxu_pill": {
+        "name": "炼虚丹", "type": "alchemy", "realm": 4, "seconds": _minutes(45),
+        "stone": 6000, "materials": {"炼虚丹残方": 4},
+        "output": {"kind": "item", "key": "炼虚丹", "qty": 1, "bound": 1}, "default": False,
+    },
 }
 
 ACCELERATE_STONE_PER_MINUTE = 5

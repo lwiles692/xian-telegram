@@ -95,11 +95,14 @@ async def collect_ready(user_id: int, now: int = None) -> list:
                      json.dumps(affixes, ensure_ascii=False)))
                 entry = {"kind": "equipment", "name": item_name(base_key)}
             else:
+                bound = int(bool(output.get("bound", 0)))
                 await conn.execute(
-                    "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
+                    "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,?,?) "
                     "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + ?",
-                    (user_id, output["key"], output["qty"], output["qty"]))
+                    (user_id, output["key"], bound, output["qty"], output["qty"]))
                 entry = {"kind": "item", "name": item_name(output["key"]), "qty": output["qty"]}
+                if bound:
+                    entry["bound"] = bound
             column = "alchemy_prof" if recipe["type"] == "alchemy" else "forge_prof"
             await conn.execute(
                 f"UPDATE characters SET {column} = {column} + 1 WHERE user_id=?",

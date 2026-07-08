@@ -126,10 +126,10 @@ async def test_market_audit_flags_high_price(temp_db):
 
 @pytest.mark.asyncio
 async def test_key_materials_cannot_be_listed_even_unbound(temp_db):
-    """R-P0-1：转修令/化神丹/保命符即便以 bound=0 进包也不得上架（绑定隔离红线）。"""
+    """R-P0-1：关键道具即便以 bound=0 进包也不得上架（绑定隔离红线）。"""
     uid = 9708
     await character.create(uid, "exploit")
-    for key in ("转修令", "化神丹", "保命符"):
+    for key in ("转修令", "化神丹", "炼虚丹", "保命符"):
         await character.add_item(uid, key, 2, bound=0)
         res = await market.create_listing(uid, key, 1, 100, now=1000)
         assert res["status"] == "no_trade", key

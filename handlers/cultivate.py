@@ -64,13 +64,16 @@ def _bt_text(res: dict) -> str:
     if s == "missing":
         return NEED_START
     if s == "at_cap":
-        return "道友已臻化神圆满，修为封顶；后续溢出将转为道行与飞升点，可继续打磨根基。"
+        return "道友已臻当前大道顶点，修为封顶；后续溢出将转为道行与飞升点，可继续打磨根基。"
     if s == "need_pill":
         pill = res["pill"]
         hint = ""
         if pill == "化神丹":
             # spec T0.8：神魂劫缺丹需指明来源，避免玩家卡关无解。
             hint = "（可往天外古墟、天魔古原寻丹，或集化神丹残方/太虚天门得方炼制。）"
+        elif pill == "炼虚丹":
+            # spec-v3 §3.4：炼虚首破来源必须落在化神可及内容，缺丹时直接指路。
+            hint = "（可往天外古墟、太虚天门、化神世界 Boss 寻残方，或得炼虚丹方后炼制。）"
         return f"大境界突破需「{pill}」护道，道友尚缺此物。{hint}"
     if s == "tribulation_choice":
         tail = "\n".join(res.get("last_log") or res.get("tribulation_log") or [])

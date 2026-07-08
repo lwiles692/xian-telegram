@@ -359,7 +359,11 @@ def ascension_arbitrage_guard() -> dict:
 
 
 # 坊市套利护栏：关键成长材料不得进 NPC 直售（否则内容门槛被灵石绕过）。
-_MARKET_BANNED_FROM_SHOP = ("化神丹", "化神丹方", "化神丹残方", "转修令")
+_MARKET_BANNED_FROM_SHOP = (
+    "化神丹", "化神丹方", "化神丹残方",
+    "炼虚丹", "炼虚丹方", "炼虚丹残方",
+    "转修令",
+)
 
 
 def market_arbitrage_violations() -> list[str]:
