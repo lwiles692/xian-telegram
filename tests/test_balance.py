@@ -13,7 +13,7 @@ from config import dao_paths as DAO
 from config import realms as R
 from tools import balance_sim as B
 
-MAP_OF = {1: "妖兽森林", 2: "万妖岭", 3: "上古战场", 4: "星陨海"}   # 各境界「易」档(向后兼容旧断言)
+MAP_OF = {1: "妖兽森林", 2: "万妖岭", 3: "上古战场", 4: "星陨海", 5: "太初雾泽"}   # 各境界「易」档
 DGN_OF = {1: "xuanming", 2: "qingyun", 3: "tianxu"}
 
 # 各大境界 (易, 中, 难) 三档地图(#20)。
@@ -23,6 +23,7 @@ TIERS = {
     2: ("万妖岭", "碧毒蛟潭", "九霄雷泽"),
     3: ("上古战场", "归墟裂谷", "天魔古原"),
     4: ("星陨海", "幽都裂隙", "天外古墟"),
+    5: ("太初雾泽", "虚空裂海", "混沌古狱"),
 }
 
 
@@ -89,7 +90,7 @@ def test_forge_craft_seconds_make_acceleration_meaningful():
 # ---- 刚突破即可参与新图普通内容(#15-2/3,核心验收) ----
 
 def test_entry_small_mobs_are_farmable():
-    for r in (1, 2, 3, 4):
+    for r in (1, 2, 3, 4, 5):
         mob, _ = B.map_winrates(r, 0, MAP_OF[r])
         assert mob >= 0.99, f"r{r} 刚解锁小怪单场胜率过低: {mob:.2f}"
         run = B.map_run_winrate(r, 0, MAP_OF[r])
@@ -97,7 +98,7 @@ def test_entry_small_mobs_are_farmable():
 
 
 def test_full_realm_small_mobs_trivial():
-    for r in (1, 2, 3, 4):
+    for r in (1, 2, 3, 4, 5):
         last = R.num_stages(r) - 1
         assert B.map_run_winrate(r, last, MAP_OF[r]) >= 0.98
 
@@ -182,7 +183,7 @@ def test_hard_maps_have_exclusive_drops():
 
 def test_hard_maps_riskier_than_easy_at_entry():
     # 同境界刚解锁时,难图连战胜率应明显低于易图(高风险)。
-    for r in (1, 2, 3, 4):
+    for r in (1, 2, 3, 4, 5):
         easy, _mid, hard = TIERS[r]
         assert B.map_run_winrate(r, 0, hard) < B.map_run_winrate(r, 0, easy)
 
@@ -324,6 +325,59 @@ def test_huashen_maps_keep_stone_margin_below_stamina_buy():
     for key in TIERS[4]:
         yield_per = B.map_stone_per_stamina(key)
         assert yield_per < cap, f"{key} 产出 {yield_per:.1f} 灵石/精力 未低于化神首买 75%({cap:.1f})"
+
+
+def test_lianxu_maps_config_and_duration_ranges():
+    from config.maps import MAPS
+    from services import explore
+
+    expected = {
+        "太初雾泽": {"stamina": 20, "minutes": (15, 18), "drop": "雾泽虚砂"},
+        "虚空裂海": {"stamina": 24, "minutes": (18, 22), "drop": "裂海空髓"},
+        "混沌古狱": {"stamina": 28, "minutes": (22, 26), "drop": "混沌残核"},
+    }
+    for key, cfg in expected.items():
+        m = MAPS[key]
+        assert m["realm"] == 5
+        assert m["stamina"] == cfg["stamina"]
+        assert m["minutes"] == cfg["minutes"]
+        assert cfg["drop"] in {drop[0] for drop in m["drops"]}
+    assert explore._plan_minutes(MAPS["太初雾泽"], False, 1) == 16.5
+    assert explore._plan_minutes(MAPS["虚空裂海"], False, 1) == 18
+    assert explore._plan_minutes(MAPS["虚空裂海"], False, 2) == 22
+    assert explore._plan_minutes(MAPS["混沌古狱"], True, 2) == 26
+
+
+def test_lianxu_entry_with_huashen_gear_hits_map_gates():
+    """spec-v3 §3.5：M0 炼虚门槛按炼虚初期 + 化神装备档验收。"""
+    from config.maps import MAPS
+
+    profile = B.LIANXU_HUASHEN_GEARED
+    assert B.map_run_winrate(5, 0, "太初雾泽", profile=profile, n=120) >= 0.95
+    assert B.map_run_winrate(5, 0, "虚空裂海", profile=profile, n=120) >= 0.65
+    assert B.winrate(5, 0, MAPS["虚空裂海"]["boss"], profile=profile, n=120) < 0.05
+    assert B.map_run_winrate(5, 0, "混沌古狱", profile=profile, n=120) < 0.05
+    assert B.winrate(5, 1, MAPS["虚空裂海"]["boss"], profile=profile, n=120) >= 0.85
+    assert B.winrate(5, 2, MAPS["混沌古狱"]["boss"], profile=profile, n=120) >= 0.85
+
+
+def test_huashen_full_buff_cannot_break_lianxu_boss_gates():
+    """spec-v3 §3.5：化神满 buff 可摸新图，但炼虚中/难图 Boss 仍不得被打穿。"""
+    from config.maps import MAPS
+
+    for profile in (B.HUASHEN_FULL_BUFF_ATK, B.HUASHEN_FULL_BUFF_SURV):
+        assert B.winrate(4, R.num_stages(4) - 1, MAPS["虚空裂海"]["boss"], profile=profile, n=120) < 0.05
+        assert B.winrate(4, R.num_stages(4) - 1, MAPS["混沌古狱"]["boss"], profile=profile, n=120) < 0.05
+        assert B.map_run_winrate(4, R.num_stages(4) - 1, "混沌古狱", profile=profile, n=120) < 0.05
+
+
+def test_lianxu_maps_keep_stone_margin_below_stamina_buy():
+    from services import shop
+
+    cap = shop.first_buy_cost_per_stamina(5) * 0.75
+    for key in TIERS[5]:
+        yield_per = B.map_stone_per_stamina(key)
+        assert yield_per < cap, f"{key} 产出 {yield_per:.1f} 灵石/精力 未低于炼虚首买 75%({cap:.1f})"
 
 
 # ---- C1: 坊市/活动/飞升产出进反套利校验（spec DoD #3）----

@@ -37,6 +37,7 @@ HUASHEN_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
                   "mind": "归元心法", "equip": ["陨星剑", "幽都甲", "太虚佩"]}
 HUASHEN_BRANCH_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
                          "mind": "归元心法", "equip": ["星河幡", "星陨袍", "幽都铃"]}
+LIANXU_HUASHEN_GEARED = HUASHEN_GEARED
 # 元婴圆满满 buff 上界档：现役元婴装备 + 可叠满临时/福利 buff（推到 §6.3 合算上限）。
 # 红线护栏（spec §3.2）：即便如此仍不得稳定刷化神中/难 Boss。M0 阶段不含道途。
 YUANYING_FULL_BUFF = {
@@ -71,7 +72,16 @@ DAO_MAX_REFINED_PROFILES = {
 }
 
 # 每张图/秘境对应的"解锁境界"。
-CONTENT_REALM = {"后山": 0, "妖兽森林": 1, "万妖岭": 2, "上古战场": 3, "星陨海": 4}
+CONTENT_REALM = {
+    "后山": 0,
+    "妖兽森林": 1,
+    "万妖岭": 2,
+    "上古战场": 3,
+    "星陨海": 4,
+    "太初雾泽": 5,
+    "虚空裂海": 5,
+    "混沌古狱": 5,
+}
 
 
 def ascension_passive_bonuses(profile=GEARED) -> dict:

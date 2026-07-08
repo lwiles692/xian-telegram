@@ -1,5 +1,6 @@
-"""历练：开始耗精力 → 等待约 10 分钟 → 结算战斗与掉落。"""
 from __future__ import annotations
+
+"""历练：开始耗精力 → 按地图时长等待 → 结算战斗与掉落。"""
 
 import random
 import time
@@ -21,12 +22,13 @@ DIFFICULTY_PLAN = {
 }
 SWEEP_UNLOCK_WINS = 3
 RARE_DROP_KEYS = {"筑基丹", "金丹", "元婴丹", "天材地宝", "阴风石", "幽冥草",
-                  "白骨精华", "腐泽妖核", "雷纹玄铁", "劫火残晶", "天魔残页", "古战魂晶"}
+                  "白骨精华", "腐泽妖核", "雷纹玄铁", "劫火残晶", "天魔残页", "古战魂晶",
+                  "雾泽虚砂", "裂海空髓", "混沌残核"}
 
 
 def _plan_minutes(m, is_boss: bool, n_enc: int) -> float:
     plan = DIFFICULTY_PLAN.get(m.get("difficulty", "易"), DIFFICULTY_PLAN["易"])
-    lo, hi = plan["minutes"]
+    lo, hi = m.get("minutes", plan["minutes"])
     elo, ehi = plan["enc"]
     if is_boss:
         return hi                       # 妖王战耗时最长
