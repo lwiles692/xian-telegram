@@ -8,6 +8,8 @@
 小怪单场必胜(可参与新图)、连战可刷;秘境入门能推进半数以上层数,
 个别档位可接近通关;Boss 入门打不动、本境界中后期能过。
 """
+from config import buffs as BUFFS
+from config import dao_paths as DAO
 from config import realms as R
 from tools import balance_sim as B
 
@@ -223,6 +225,52 @@ def test_yuanying_full_buff_cannot_farm_huashen_mid_hard_bosses():
         boss = MAPS[map_key]["boss"]
         wr = B.winrate(3, last, boss, profile=B.YUANYING_FULL_BUFF, n=200)
         assert wr < 0.05, f"{map_key} Boss 被元婴满 buff 刷穿：胜率 {wr:.2%}"
+
+
+def test_huashen_full_buff_profiles_include_m0_sources():
+    """spec-v3 M0 T0.2：化神满 buff 档必须含满道途、满淬炼、飞升被动。"""
+    for profile, path_key in (
+            (B.HUASHEN_FULL_BUFF_ATK, "sword"),
+            (B.HUASHEN_FULL_BUFF_SURV, "body"),
+    ):
+        assert profile["dao_path"] == path_key
+        assert profile["dao_rank"] == len(DAO.RANK_NAMES) - 1
+        assert profile["dao_refine"] == DAO.REFINE_MAX_LEVEL
+        assert B.ascension_passive_bonuses(profile) == {
+            "hp_pct": 0.05,
+            "atk_pct": 0.05,
+            "df_pct": 0.05,
+            "seclusion_pct": 0.05,
+        }
+    assert B.seclusion_efficiency(B.HUASHEN_FULL_BUFF_SURV) > 1.0
+
+
+def test_huashen_full_buff_profiles_reach_clamp_ceiling():
+    """spec-v3 M0 T0.2：攻击/生存极端档推到全局百分比合算上限。"""
+    last = R.num_stages(4) - 1
+    atk = B.build_player_stats(4, last, B.HUASHEN_FULL_BUFF_ATK)
+    surv = B.build_player_stats(4, last, B.HUASHEN_FULL_BUFF_SURV)
+    atk_cap = B.build_player_stats(
+        4, last,
+        {**B.HUASHEN_GEARED, "extra_pct": {
+            "atk": BUFFS.ATTACK_PCT_CAP * 2,
+            "crit": BUFFS.ATTACK_PCT_CAP * 2,
+        }})
+    surv_cap = B.build_player_stats(
+        4, last,
+        {**B.HUASHEN_GEARED, "extra_pct": {
+            "hp": BUFFS.SURVIVAL_PCT_CAP * 2,
+            "df": BUFFS.SURVIVAL_PCT_CAP * 2,
+        }})
+
+    assert atk["atk"] == atk_cap["atk"]
+    assert atk["crit"] == atk_cap["crit"]
+    assert surv["hp"] == surv_cap["hp"]
+    assert surv["df"] == surv_cap["df"]
+    assert B.boss_damage_per_challenge(4, 2, "huashen", profile=B.HUASHEN_FULL_BUFF_ATK, n=80) > (
+        B.boss_damage_per_challenge(4, 2, "huashen", profile=B.HUASHEN_FULL_BUFF_SURV, n=80))
+    assert surv["hp"] > atk["hp"]
+    assert surv["df"] > atk["df"]
 
 
 def test_yuanying_treasure_gear_fills_mid_map_gap_without_entry_boss_break():

@@ -15,7 +15,7 @@ import random
 from config import realms as R
 from config import buffs as BUFFS
 from config import dao_paths as DAO
-from config.ascension import PASSIVE_CAP
+from config.ascension import PASSIVE_CAP, PASSIVES
 from config.bosses import WORLD_BOSSES
 from config.dungeons import DUNGEONS
 from config.items import ITEMS
@@ -43,6 +43,23 @@ YUANYING_FULL_BUFF = {
     "extra_pct": {"atk": BUFFS.ATTACK_PCT_CAP, "crit": BUFFS.ATTACK_PCT_CAP,
                   "hp": BUFFS.SURVIVAL_PCT_CAP, "df": BUFFS.SURVIVAL_PCT_CAP},
 }
+ASCENSION_FULL_PASSIVES = {key: PASSIVE_CAP for key in PASSIVES}
+HUASHEN_FULL_BUFF_ATK = {
+    **HUASHEN_GEARED,
+    "dao_path": "sword",
+    "dao_rank": len(DAO.RANK_NAMES) - 1,
+    "dao_refine": DAO.REFINE_MAX_LEVEL,
+    "ascension_passives": ASCENSION_FULL_PASSIVES,
+    "extra_pct": {"atk": BUFFS.ATTACK_PCT_CAP, "crit": BUFFS.ATTACK_PCT_CAP},
+}
+HUASHEN_FULL_BUFF_SURV = {
+    **HUASHEN_GEARED,
+    "dao_path": "body",
+    "dao_rank": len(DAO.RANK_NAMES) - 1,
+    "dao_refine": DAO.REFINE_MAX_LEVEL,
+    "ascension_passives": ASCENSION_FULL_PASSIVES,
+    "extra_pct": {"hp": BUFFS.SURVIVAL_PCT_CAP, "df": BUFFS.SURVIVAL_PCT_CAP},
+}
 DAO_MAX_PROFILES = {
     key: {**GEARED, "dao_path": key, "dao_rank": len(DAO.RANK_NAMES) - 1}
     for key in DAO.DAO_PATHS
@@ -54,6 +71,14 @@ DAO_MAX_REFINED_PROFILES = {
 
 # 每张图/秘境对应的"解锁境界"。
 CONTENT_REALM = {"后山": 0, "妖兽森林": 1, "万妖岭": 2, "上古战场": 3, "星陨海": 4}
+
+
+def ascension_passive_bonuses(profile=GEARED) -> dict:
+    bonuses = {}
+    for key, level in profile.get("ascension_passives", {}).items():
+        if key in PASSIVES:
+            bonuses[key] = min(PASSIVE_CAP, max(0, int(level))) * 0.01
+    return bonuses
 
 
 def build_player_stats(realm: int, stage: int, profile=GEARED) -> dict:
@@ -85,6 +110,11 @@ def build_player_stats(realm: int, stage: int, profile=GEARED) -> dict:
                 pct_bonus[sk] += float(v)
         elif k in R.STAT_KEYS:
             base[k] = base.get(k, 0) + int(v)
+    for k, v in ascension_passive_bonuses(profile).items():
+        if k.endswith("_pct"):
+            sk = k[:-4]
+            if sk in pct_bonus:
+                pct_bonus[sk] += float(v)
     for k, v in profile.get("extra_pct", {}).items():
         if k in pct_bonus:
             pct_bonus[k] += float(v)
@@ -209,7 +239,9 @@ def seclusion_efficiency(profile=GEARED) -> float:
     bonus = DAO.bonuses_for(
         profile.get("dao_path", ""), profile.get("dao_rank", 0),
         profile.get("dao_refine", 0))
-    return 1.0 + min(BUFFS.SECLUSION_PCT_CAP, max(0.0, float(bonus.get("seclusion_pct", 0))))
+    asc_bonus = ascension_passive_bonuses(profile)
+    raw = float(bonus.get("seclusion_pct", 0)) + float(asc_bonus.get("seclusion_pct", 0))
+    return 1.0 + min(BUFFS.SECLUSION_PCT_CAP, max(0.0, raw))
 
 
 # ---- 经济:套利 ----
@@ -376,6 +408,17 @@ def report() -> None:
           f" → 满淬炼 {body_taixu_refined*100:5.1f}%")
     print(f"  剑修 星陨海Boss(r4入门) 未淬炼 {sword_xingyun*100:5.1f}%"
           f" → 满淬炼 {sword_xingyun_refined*100:5.1f}%")
+    print("-" * 78)
+    print("M0 化神圆满满 buff 上界档: 满道途 + 满淬炼 + 飞升被动 + clamp 顶")
+    for label, profile in (
+            ("HUASHEN_FULL_BUFF_ATK", HUASHEN_FULL_BUFF_ATK),
+            ("HUASHEN_FULL_BUFF_SURV", HUASHEN_FULL_BUFF_SURV),
+    ):
+        st = build_player_stats(4, R.num_stages(4) - 1, profile)
+        taixu = dungeon_clear_fraction(4, R.num_stages(4) - 1, "taixu", profile=profile, n=120)
+        huashen_boss = world_boss_kill_challenges("huashen", 4, 2, n=120, profile=profile)
+        print(f"  {label:<22} hp{st['hp']:>6} atk{st['atk']:>5} df{st['df']:>5} "
+              f"crit{st['crit']:>4} 太虚{taixu*100:5.1f}% 化神Boss≈{huashen_boss:5.1f}次")
     print("=" * 78)
     print("世界 Boss 单次伤害 & 击杀所需挑战次数(满配)")
     for bkey, cfg in WORLD_BOSSES.items():
