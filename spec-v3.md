@@ -331,9 +331,10 @@ v2 落地的这些能力，三期必须复用而不是另起炉灶：
   `[start_at, now]`（先按 `OFFLINE_CAP_HOURS` 截断）时，查道侣在该区间内的闭关区段——
   进行中的闭关取 `[partner_start_at, now]`，已结束的取其落库区间——求交集秒数，
   该秒数部分额外 +5%（先截断、后求交，双方各自独立结算，互不触发对方收功）。
-- 道侣的闭关起止时间戳现已落库（`characters` 闭关状态字段），读侧用 `db.fetchone` 即可，
-  无新表；但已结束闭关的历史区间若未保留，需在收功时把最近一次闭关区间写回（一列起止即可，
-  只为对方结算窗口内的交集查询服务，不做全量历史）。
+- 道侣**进行中**闭关的开始时间戳已落库（`characters.seclusion_at`，0=未闭关），读侧用
+  `db.fetchone` 即可，无新表；但已结束闭关的历史区间当前**未保留**，需在收功时把最近一次
+  闭关区间写回（`last_seclusion_start/end` 两列，见 §8.2，只为对方结算窗口内的交集查询服务，
+  不做全量历史）。
 - 收功文案必须展示重叠收益，否则玩家无感知：例如
   `与道侣同参 137 分钟，双修额外修为 +xxx`。无重叠时段则不展示该行。
 - **clamp 截断透明化**：双修 +5% 被 SECLUSION clamp 截断时，收功文案显示"已达闭关增益上限"
@@ -506,11 +507,13 @@ config.dungeons:  xukong = 虚空神殿
 config.bosses:    lianxu = 吞虚魔蟒
 config.shop:      STAMINA_BUY_BASE[5] = 6000
 config.auction:   白名单材料、底价、税率、拍期、防狙击参数、buyout 最低倍率(1.2)
-config.social:    师徒里程碑奖励表、传功额度、出师活跃天数门槛、周活跃回报额度/封顶、
+config.bonds:     师徒里程碑奖励表、传功额度、出师活跃天数门槛、周活跃回报额度/封顶、
                   道侣互赠白名单、双修加成、共修仪式参数（时长/收益/限周）、新角色引导任务链
+                  （模块名取 bonds：config/social.py 已被 v2 群播报/DM 通知占用）
 config.crafting:  炼虚丹残方 ×4 合成配方（产物绑定）
 config.natal:     本命法宝认主消耗、喂养成本曲线、等级上限(10)、斩缚费用（M5 前占位）
-config.tribulation: 心魔劫选项参数（道心通明时长/幅度、失败额外损失 5%）
+config.events:    心魔劫选项参数（道心通明时长/幅度、失败额外损失 5%）——落现有天劫选项
+                  （TRIBULATION_ACTIONS）所在模块，不新建 config/tribulation
 
 game_flags(kv):   overflow_demote_grace_until = M0 首启部署时刻 + 28 天（§3.8，不写死代码）
 
