@@ -6,13 +6,29 @@ import time
 
 from services import character
 from services import game_events, social
-from services.combat import Combatant, simulate
+from services.combat import CombatRules, Combatant, simulate
 from models import db
 
 K_FACTOR = 32
 DAILY_LIMIT = 10
 WIN_REPUTATION = 3
 LOSS_REPUTATION = 1
+PVP_MAX_ROUNDS = 160
+PVP_COMBAT_RULES = CombatRules(
+    heal_factor=0.08,
+    heal_decay_start_round=45,
+    heal_decay_per_round=0.062,
+    lifesteal_factor=0.40,
+    shield_absorb_pct=0.40,
+    damage_growth_start_round=45,
+    damage_growth_per_round=0.018,
+    damage_growth_cap=1.50,
+    pressure_start_round=60,
+    pressure_base_pct=0.002,
+    pressure_growth_pct=0.00015,
+    pressure_cap_pct=0.022,
+    notice="斗法台禁制落下：疗伤、汲血与护盾皆受压，久战气机反噬。",
+)
 
 # 周结算奖池（#14）：取代即时发灵石，按本周有效声望排名发放。
 WEEKLY_POOL_STONE = 6000
@@ -203,7 +219,9 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None,
 
     a = await _combatant(attacker_id, attacker_name)
     d = await _combatant(defender_id, defender_name)
-    result = simulate(a, d, seed=random.getrandbits(32), max_rounds=None)
+    result = simulate(
+        a, d, seed=random.getrandbits(32),
+        max_rounds=PVP_MAX_ROUNDS, rules=PVP_COMBAT_RULES)
     attacker_win = result["winner"] is a
 
     week = _week(now)
@@ -258,7 +276,7 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None,
             "reputation_gain": attacker_rep, "reputation_counted": rep_counts,
             "tier": tier(new_a_rating),
             "defender_id": defender_id, "log": result["log"],
-            "rounds": result["rounds"],
+            "rounds": result["rounds"], "finish_reason": result["reason"],
             "attacker_name": attacker_name, "defender_name": defender_name}
 
 

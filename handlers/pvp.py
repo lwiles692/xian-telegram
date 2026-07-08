@@ -47,6 +47,7 @@ def _preview_text(attacker_name: str, opponent_name: str) -> str:
     return "\n".join([
         f"⚔️ 切磋邀战：{attacker_name} vs {opponent_name}",
         "此战只影响天梯积分与声望，不掉资源。",
+        "斗法台有禁制压阵，疗伤、汲血与护盾皆受压，久战按残余气机裁定。",
         "确认后即刻自动结算。",
     ])
 
