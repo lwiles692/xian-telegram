@@ -81,7 +81,7 @@ def _bt_text(res: dict) -> str:
         fall = "魔念翻涌" if res.get("target_realm") == 4 else "雷将落"
         prefix = f"⚡ {trial}未尽，第 {res['thunder_index']}/{res.get('total', 3)} 段{fall}。"
         hp = f"\n当前气血：{res['hp']}" if res.get("hp") is not None else ""
-        return "\n".join(line for line in [prefix + hp, tail, "请选择应对。"] if line)
+        return "\n".join(line for line in [prefix + hp, _rate_text(res), tail, "请选择应对。"] if line)
     if s == "need_item":
         return f"缺少「{res['item']}」，此法暂不可用。"
     if s == "bad_action":
@@ -92,23 +92,36 @@ def _bt_text(res: dict) -> str:
         return f"📈 水到渠成，道友晋入 {res['label']}！"
     if s == "big_success":
         tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
+        rate = f"\n{_rate_text(res)}" if _rate_text(res) else ""
         if res["tribulation"]:
             trial = "神魂劫" if "神魂劫" in tail else "天劫"
             if trial == "神魂劫":
-                return f"🌀 神魂劫已尽，心魔归寂——道友破妄凝神，臻至 {res['label']}！{tail}"
-            return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！{tail}"
-        return f"✨ 灵气灌顶，道友冲破桎梏，迈入 {res['label']}！"
+                return f"🌀 神魂劫已尽，心魔归寂——道友破妄凝神，臻至 {res['label']}！{rate}{tail}"
+            return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！{rate}{tail}"
+        return f"✨ 灵气灌顶，道友冲破桎梏，迈入 {res['label']}！{rate}"
     if s == "big_fail":
         tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
+        rate = f"\n{_rate_text(res)}" if _rate_text(res) else ""
         if res["tribulation"]:
             head = "🌀 神魂劫凶险" if "神魂劫" in tail else "⚡ 天劫凶猛"
         else:
             head = "✗ 冲关受阻"
         return (
             f"{head}，道友未能破境，道基不稳（修为 −{res['loss']}，"
-            f"法身六维暂降），所幸未曾跌境。来日再战。{tail}"
+            f"法身六维暂降），所幸未曾跌境。来日再战。{rate}{tail}"
         )
     return "天机紊乱，突破未果。"
+
+
+def _rate_text(res: dict) -> str:
+    if "rate" not in res:
+        return ""
+    rate = int(round(float(res["rate"]) * 100))
+    guarantee = float(res.get("guarantee_bonus") or 0.0)
+    if guarantee > 0:
+        bonus = int(round(guarantee * 100))
+        return f"本次破境成功率：{rate}%（保底+{bonus}%）。"
+    return f"本次破境成功率：{rate}%。"
 
 
 async def _bt_markup(user_id: int, res: dict):

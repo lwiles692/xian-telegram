@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS characters (
     stamina_buy_day     TEXT,
     pill_stamina_count  INTEGER NOT NULL DEFAULT 0,
     pill_stamina_day    TEXT,
+    big_fail_streak     INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventory (
@@ -218,6 +219,7 @@ CREATE TABLE IF NOT EXISTS tribulation_sessions (
     cultivation   INTEGER NOT NULL,
     cost          INTEGER NOT NULL,
     rate          REAL NOT NULL,
+    guarantee_bonus REAL NOT NULL DEFAULT 0,
     guard_bonus   INTEGER NOT NULL DEFAULT 0,
     hp            INTEGER NOT NULL,
     thunder_index INTEGER NOT NULL DEFAULT 1,
@@ -382,6 +384,8 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "stamina_buy_day", "TEXT")
     await _ensure_column(_conn, "characters", "pill_stamina_count", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "pill_stamina_day", "TEXT")
+    # spec-v3 §8.2：失败保底字段仅供化神→炼虚大突破读取；低境界大突破不读不写。
+    await _ensure_column(_conn, "characters", "big_fail_streak", "INTEGER NOT NULL DEFAULT 0")
     # 当前气血/法力（#24）：可空，NULL ⇒ 视为满（旧存档零回填；首次结算按当前 max 落地）。
     # hp_at/mp_at 为各自回复的惰性结算锚点，NULL ⇒ 视为 now（不补算历史回复）。
     await _ensure_column(_conn, "characters", "current_hp", "INTEGER")
@@ -419,6 +423,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "dungeon_jobs", "start_hp", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "start_mp", "INTEGER")
     await _ensure_column(_conn, "ascension", "last_trial_week", "TEXT")
+    await _ensure_column(_conn, "tribulation_sessions", "guarantee_bonus", "REAL NOT NULL DEFAULT 0")
     await _migrate_inventory_bound(_conn)
     await _migrate_sect_outposts_pk(_conn)
     await _conn.commit()

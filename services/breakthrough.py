@@ -19,6 +19,8 @@ from services import dao_path
 
 FAIL_CULT_LOSS = 0.30
 UNSTABLE_SECONDS = 6 * 3600
+LIANXU_TARGET_REALM = 5
+BIG_FAIL_GUARANTEE_STEP = 0.10
 
 
 def big_success_rate(realm: int, root_bone: int, pill_bonus: float = 0.0) -> float:
@@ -26,6 +28,30 @@ def big_success_rate(realm: int, root_bone: int, pill_bonus: float = 0.0) -> flo
     base = BIG_BREAKTHROUGH[realm + 1]["base_rate"]
     rate = base + (root_bone - 50) * 0.003 + pill_bonus
     return max(0.05, min(0.95, rate))
+
+
+def _lianxu_guarantee_bonus(target_realm: int, fail_streak: int) -> float:
+    if target_realm != LIANXU_TARGET_REALM:
+        return 0.0
+    return max(0, int(fail_streak or 0)) * BIG_FAIL_GUARANTEE_STEP
+
+
+def _apply_guarantee(rate: float, guarantee_bonus: float) -> float:
+    return max(0.05, min(0.95, rate + guarantee_bonus))
+
+
+async def _record_big_failure(conn, user_id: int, target_realm: int):
+    if target_realm == LIANXU_TARGET_REALM:
+        await conn.execute(
+            "UPDATE characters SET big_fail_streak=big_fail_streak+1 WHERE user_id=?",
+            (user_id,))
+
+
+async def _clear_big_fail_streak(conn, user_id: int, target_realm: int):
+    if target_realm == LIANXU_TARGET_REALM:
+        await conn.execute(
+            "UPDATE characters SET big_fail_streak=0 WHERE user_id=?",
+            (user_id,))
 
 
 def tribulation_trial(source_realm: int, source_stage: int, root_bone: int,
@@ -69,16 +95,18 @@ async def _breakthrough_mods(conn, user_id: int) -> dict:
 
 
 async def _fail(conn, user_id: int, cultivation: int, rate: float, trib: bool,
-                loss: int = None, tribulation_log=None, now: int = None):
+                loss: int = None, tribulation_log=None, now: int = None,
+                target_realm: int = None, guarantee_bonus: float = 0.0):
     now = int(time.time()) if now is None else now
     loss = int(cultivation * FAIL_CULT_LOSS) if loss is None else loss
     debuff = json.dumps({"unstable_until": now + UNSTABLE_SECONDS}, ensure_ascii=False)
+    await _record_big_failure(conn, user_id, target_realm or -1)
     await conn.execute(
         "UPDATE characters SET cultivation=MAX(0, cultivation - ?), debuff_json=? WHERE user_id=?",
         (loss, debuff, user_id))
     return {"status": "big_fail", "rate": rate, "tribulation": trib, "loss": loss,
             "tribulation_log": tribulation_log or [],
-            "debuff_seconds": UNSTABLE_SECONDS}
+            "debuff_seconds": UNSTABLE_SECONDS, "guarantee_bonus": guarantee_bonus}
 
 
 def _tribulation_actions(target_realm: int) -> dict:
@@ -95,6 +123,7 @@ def _tribulation_status(row) -> dict:
             "target_realm": row["target_realm"],
             "thunder_index": row["thunder_index"], "total": 3,
             "hp": row["hp"], "choices": _tribulation_choices(row["target_realm"]),
+            "rate": row["rate"], "guarantee_bonus": row["guarantee_bonus"],
             "tribulation_log": json.loads(row["log_json"] or "[]")}
 
 
@@ -136,10 +165,14 @@ async def try_advance(user_id: int, now: int = None) -> dict:
             # 丹修道途 alchemy_pct 直接加成大突破成功率（口径同 balance_sim）。
             dao_bonus = await dao_path.active_bonuses(user_id)
             pill_bonus = mods["rate"] + float(dao_bonus.get("alchemy_pct", 0.0))
-            rate = big_success_rate(char["realm"], char["root_bone"], pill_bonus)
+            base_rate = big_success_rate(char["realm"], char["root_bone"], pill_bonus)
+            guarantee_bonus = _lianxu_guarantee_bonus(target, char["big_fail_streak"])
+            rate = _apply_guarantee(base_rate, guarantee_bonus)
             trib = BIG_BREAKTHROUGH[target]["tribulation"]
             if random.random() >= rate:
-                return await _fail(conn, user_id, char["cultivation"], rate, trib, now=now)
+                return await _fail(
+                    conn, user_id, char["cultivation"], rate, trib, now=now,
+                    target_realm=target, guarantee_bonus=guarantee_bonus)
             tribulation = {"survived": True, "log": []}
             if trib:
                 stats = base_stats(char["realm"], char["stage"])
@@ -147,14 +180,15 @@ async def try_advance(user_id: int, now: int = None) -> dict:
                 await conn.execute(
                     "INSERT OR REPLACE INTO tribulation_sessions("
                     "user_id, source_realm, source_stage, target_realm, target_stage, "
-                    "cultivation, cost, rate, guard_bonus, hp, thunder_index, seed, log_json, created_at"
-                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "cultivation, cost, rate, guarantee_bonus, guard_bonus, hp, thunder_index, seed, log_json, created_at"
+                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (user_id, char["realm"], char["stage"], nxt[0], nxt[1],
-                     char["cultivation"], cost, rate, base_guard, stats["hp"], 1,
+                     char["cultivation"], cost, rate, guarantee_bonus, base_guard, stats["hp"], 1,
                      random.randint(1, 10_000_000), "[]", now))
                 row = await _session(conn, user_id)
                 return _tribulation_status(row)
             if tribulation["survived"]:
+                await _clear_big_fail_streak(conn, user_id, target)
                 await conn.execute(
                     "UPDATE characters SET realm=?, stage=?, cultivation=?, debuff_json='{}' "
                     "WHERE user_id=?",
@@ -165,10 +199,12 @@ async def try_advance(user_id: int, now: int = None) -> dict:
                      "label": realm_label(nxt[0], nxt[1])}, now)
                 return {"status": "big_success", "rate": rate, "tribulation": trib,
                         "label": realm_label(nxt[0], nxt[1]),
-                        "tribulation_log": tribulation["log"]}
+                        "tribulation_log": tribulation["log"],
+                        "guarantee_bonus": guarantee_bonus}
             return await _fail(
                 conn, user_id, char["cultivation"], rate, trib,
-                tribulation_log=tribulation["log"], now=now)
+                tribulation_log=tribulation["log"], now=now,
+                target_realm=target, guarantee_bonus=guarantee_bonus)
 
         await conn.execute(
             "UPDATE characters SET realm=?, stage=?, cultivation=?, debuff_json='{}' WHERE user_id=?",
@@ -212,9 +248,12 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
         if hp <= 0:
             await conn.execute("DELETE FROM tribulation_sessions WHERE user_id=?", (user_id,))
             return await _fail(conn, user_id, row["cultivation"], row["rate"], True,
-                               tribulation_log=logs, now=now)
+                               tribulation_log=logs, now=now,
+                               target_realm=row["target_realm"],
+                               guarantee_bonus=row["guarantee_bonus"])
         if idx >= 3:
             await conn.execute("DELETE FROM tribulation_sessions WHERE user_id=?", (user_id,))
+            await _clear_big_fail_streak(conn, user_id, row["target_realm"])
             await conn.execute(
                 "UPDATE characters SET realm=?, stage=?, "
                 "cultivation=MAX(0, cultivation - ?), debuff_json='{}' "
@@ -226,7 +265,8 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
                 {"target_realm": row["target_realm"], "target_stage": row["target_stage"],
                  "label": label}, now)
             return {"status": "big_success", "rate": row["rate"], "tribulation": True,
-                    "label": label, "tribulation_log": logs}
+                    "label": label, "tribulation_log": logs,
+                    "guarantee_bonus": row["guarantee_bonus"]}
         await conn.execute(
             "UPDATE tribulation_sessions SET hp=?, thunder_index=?, log_json=? WHERE user_id=?",
             (hp, idx + 1, json.dumps(logs, ensure_ascii=False), user_id))
