@@ -173,8 +173,8 @@ def _overflow_week(now: int) -> str:
 async def _cap_overflow_daohang(conn, user_id: int, raw: int, now: int) -> int:
     """溢出转道行受周上限约束，返回本次实际可入账的道行（已扣减本周已用额度）。
 
-    满级/准满级挂机 100% 溢出，若不封顶会把道行做成绕过周经济的无限水管（元婴大圆满尤甚，
-    该档飞升试炼未解锁、几乎无对口 sink）。计量落 weekly_activity.overflow_daohang。
+    满级/准满级挂机 100% 溢出，若不封顶会把道行做成绕过周经济的无限水管。
+    计量落 weekly_activity.overflow_daohang。
     """
     if raw <= 0:
         return 0
@@ -934,7 +934,7 @@ async def _grant_reward_conn(conn, user_id: int, stone: int = 0,
         "UPDATE characters SET spirit_stone = MAX(0, spirit_stone + ?) WHERE user_id=?",
         (stone, user_id))
     if cultivation:
-        # 发奖同样走溢出分流（#1）：化神圆满不再无限涨修为，越界转道行+飞升点。
+        # 发奖同样走溢出分流（#1）：顶点圆满不再无限涨修为，越界转道行+飞升点。
         # 对非满级为 no-op（kept=cur+gain, daohang=0, asc=0），不改变既有发奖语义。
         cur = await conn.execute(
             "SELECT realm, stage, cultivation FROM characters WHERE user_id=?",

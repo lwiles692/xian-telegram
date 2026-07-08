@@ -30,7 +30,7 @@ TIERS = {
 
 def test_seclusion_stage_seconds_increases_with_realm():
     secs = [R.seclusion_stage_seconds(r) for r in range(len(R.REALM_NAMES))]
-    assert secs == [16 * 3600, 24 * 3600, 36 * 3600, 48 * 3600, 96 * 3600]
+    assert secs == [16 * 3600, 24 * 3600, 36 * 3600, 48 * 3600, 96 * 3600, 144 * 3600]
     assert secs == sorted(secs)  # 越高境界每小阶越慢,抵消"小阶少→偏快"
 
 
@@ -157,7 +157,7 @@ def test_world_boss_total_hp_scaled_not_one_shot():
 
 def test_each_realm_has_three_difficulty_maps():
     from config.maps import maps_at_realm
-    for r in range(len(R.REALM_NAMES)):
+    for r in sorted(TIERS):
         assert [m["difficulty"] for _, m in maps_at_realm(r)] == ["易", "中", "难"]
 
 

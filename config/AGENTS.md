@@ -6,7 +6,7 @@ Pure data: dicts, lists, constants. No DB, no async, no imports of `services`/`h
 
 | Module | Contents |
 |--------|----------|
-| `realms.py` | `REALM_NAMES` (0..4), `REALM_STAGES`, `STAT_KEYS`, `BIG_BREAKTHROUGH` (pill/rate/tribulation per realm), `_ANCHORS` (stat ranges per realm/stage), `STAMINA_CAP`, `SECLUSION_STAGE_HOURS`. |
+| `realms.py` | `REALM_NAMES` (0..5), `REALM_STAGES`, `STAT_KEYS`, `BIG_BREAKTHROUGH` (pill/rate/tribulation per realm), `_ANCHORS` (stat ranges per realm/stage), `STAMINA_CAP`, `SECLUSION_STAGE_HOURS`. |
 | `items.py` | `ITEMS` dict, `equipment_slot(key)`, `item_name(key)`, `weapon_bonus(key)`. |
 | `equipment.py` | `ENHANCE_PER_LEVEL`, slot/affix tables. |
 | `skills.py` | `SKILLS`, `COMBAT_SLOTS`, `MIND_SLOT`, `STARTER_SKILL`, `STARTER_MIND`, `skill_bonus`, `is_mind_skill`. |
@@ -29,7 +29,7 @@ Pure data: dicts, lists, constants. No DB, no async, no imports of `services`/`h
 ## Conventions
 - `from __future__ import annotations` first line.
 - Module-level constants UPPER_SNAKE; lookup helpers `snake_case(key)`.
-- Numeric tables indexed by realm `0..4` (炼气/筑基/金丹/元婴/化神) unless stated.
+- Numeric tables indexed by realm `0..5` (炼气/筑基/金丹/元婴/化神/炼虚) unless stated.
 - Stat keys: `("hp","mp","atk","df","spd","crit")` — `df` not `def`.
 - Tuning comments cite `spec §X.Y`, `#NN`, `#AX`. Preserve.
 

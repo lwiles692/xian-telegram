@@ -18,7 +18,7 @@ def test_huashen_pill_drop_is_two_thirds_of_yuanying():
 
 
 def test_realm4_config_complete():
-    assert len(R.REALM_NAMES) == 5
+    assert len(R.REALM_NAMES) == 6
     assert R.REALM_STAGES[4] == R.REALM_STAGES[3]
     assert R.STAMINA_CAP[4] == 240
     assert R.SECLUSION_STAGE_HOURS[4] == 96
@@ -27,10 +27,30 @@ def test_realm4_config_complete():
     assert R.BIG_BREAKTHROUGH[4] == {"pill": "化神丹", "base_rate": 0.50, "tribulation": True}
 
 
+def test_realm5_config_complete():
+    assert R.REALM_NAMES[5] == "炼虚期"
+    assert R.REALM_STAGES[5] == R.REALM_STAGES[4]
+    assert R.STAMINA_CAP[5] == 280
+    assert R.SECLUSION_STAGE_HOURS[5] == 144
+    assert R._REALM_BASE_COST[5] == 4_000_000
+    assert R._ANCHORS[5] == (
+        dict(hp=78000, mp=6300, atk=5600, df=4100, spd=1300, crit=420),
+        dict(hp=170000, mp=13500, atk=12000, df=8800, spd=2300, crit=700),
+    )
+    assert R.BIG_BREAKTHROUGH[5] == {"pill": "炼虚丹", "base_rate": 0.45, "tribulation": True}
+
+
 def test_realm4_progression_and_stats():
     assert R.next_stage(3, 3) == (4, 0)
     assert R.is_big_breakthrough(3, 3) is True
-    assert R.next_stage(4, 3) is None
-    assert R.is_big_breakthrough(4, 3) is False
+    assert R.next_stage(4, 3) == (5, 0)
+    assert R.is_big_breakthrough(4, 3) is True
     assert R.base_stats(4, 0)["hp"] == 24000
     assert R.base_stats(4, 3)["hp"] == 52000
+
+
+def test_realm5_progression_and_stats():
+    assert R.next_stage(5, 3) is None
+    assert R.is_big_breakthrough(5, 3) is False
+    assert R.base_stats(5, 0)["hp"] == 78000
+    assert R.base_stats(5, 3)["hp"] == 170000
