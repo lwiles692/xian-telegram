@@ -1,5 +1,6 @@
-"""/craft —— 炼丹炼器。"""
 from __future__ import annotations
+
+"""/craft —— 炼丹炼器。"""
 
 import time
 
@@ -23,6 +24,14 @@ CRAFT_CATEGORIES = [
 ]
 _CAT_TITLE = {cat: title for cat, title, _ in CRAFT_CATEGORIES}
 _CAT_ICON = {"alchemy": "💊", "forge": "⚒️"}
+LOCKED_RECIPE_HINTS = {
+    "alchemy": [
+        {"realm": 4, "recipe_key": "lianxu_pill", "text": "炼虚丹（待解锁）：需炼虚丹方，集炼虚丹残方四合一护道。"},
+    ],
+    "forge": [
+        {"realm": 4, "recipe_key": None, "text": "炼虚法宝（待解锁）：炼虚装备图纸残页已现世，待虚空神殿开炉参悟。"},
+    ],
+}
 
 
 def _collected_text(item: dict) -> str:
@@ -41,6 +50,18 @@ def _duration(seconds: int) -> str:
         return f"{minutes} 分钟"
     hours, rest = divmod(minutes, 60)
     return f"{hours} 小时 {rest} 分钟" if rest else f"{hours} 小时"
+
+
+def _locked_hints(cat: str, realm: int, shown_keys: set[str]) -> list[str]:
+    hints = []
+    for hint in LOCKED_RECIPE_HINTS.get(cat, []):
+        if realm < hint["realm"]:
+            continue
+        recipe_key = hint.get("recipe_key")
+        if recipe_key and recipe_key in shown_keys:
+            continue
+        hints.append(hint["text"])
+    return hints
 
 
 async def render_craft(user_id: int):
@@ -94,12 +115,17 @@ async def render_craft_category(user_id: int, cat: str):
 
     lines = [f"{_CAT_ICON[cat]} {_CAT_TITLE[cat]}"]
     buttons = []
+    shown_keys = {key for key, _recipe in recipes}
     for key, recipe in recipes:
         mats = "、".join(f"{item_name(k)}×{v}" for k, v in recipe["materials"].items())
         lines.append(f"- {recipe['name']}：{mats} / 🪙{recipe['stone']} / {_duration(recipe['seconds'])}")
         buttons.append(InlineKeyboardButton(
             text=f"{recipe['name']} {recipe['stone']}",
             callback_data=await action_callback_data(user_id, f"craft:start:{key}")))
+    locked = _locked_hints(cat, char.realm, shown_keys)
+    if locked:
+        lines.append("未启炉线索：")
+        lines.extend(f"- {text}" for text in locked)
     rows = button_grid(buttons)
     rows.append([InlineKeyboardButton(text="↩️ 返回炼制", callback_data="nav:craft")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)

@@ -1,5 +1,6 @@
-"""物品定义（静态）。type: equipment/material/pill/page/recipe。"""
 from __future__ import annotations
+
+"""物品定义（静态）。type: equipment/material/pill/page/recipe。"""
 
 ITEMS = {
     "新手剑": {"name": "新手木剑", "type": "equipment", "slot": "weapon",
@@ -40,6 +41,7 @@ ITEMS = {
     "化神丹残方": {"name": "化神丹残方", "type": "material", "sell": 90},
     "炼虚丹": {"name": "炼虚丹",   "type": "pill", "sell": 900},
     "炼虚丹残方": {"name": "炼虚丹残方", "type": "material", "sell": 120},
+    "炼虚装备图纸残页": {"name": "炼虚装备图纸残页", "type": "material", "sell": 100},
     "雾泽虚砂": {"name": "雾泽虚砂", "type": "material", "sell": 140},
     "裂海空髓": {"name": "裂海空髓", "type": "material", "sell": 160},
     "混沌残核": {"name": "混沌残核", "type": "material", "sell": 180},
