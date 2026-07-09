@@ -159,6 +159,10 @@ def _group_text(event_type: str, payload: dict) -> str:
     if event_type == "partner.dissolved":
         partner = payload.get("partner_name", "旧侣")
         return f"💔 {name} 与「{partner}」解契，各自归山，因缘暂歇。"
+    if event_type == "natal.bind":
+        return f"🔮 {name} 祭炼「{payload.get('item', '法宝')}」为本命法宝，神魂相契。"
+    if event_type == "natal.unbind":
+        return f"🔮 {name} 斩去「{payload.get('item', '法宝')}」本命牵系，灵光暂敛。"
     if event_type == "auction.high_price_sale":
         item = payload.get("item", "拍品")
         qty = payload.get("qty") or 1

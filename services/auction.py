@@ -190,6 +190,8 @@ async def create_equipment_auction(seller_id: int, instance_id: int, start_price
             return {"status": "not_equipment"}
         if inst["equipped_slot"]:
             return {"status": "equipped"}
+        if int(inst["bound"] or 0) or int(inst["natal_level"] or 0):
+            return {"status": "bound"}
         floor = CFG.floor_price_for_tier(inst["tier"])
         if err := _validate_start_price(start_price, floor):
             return err

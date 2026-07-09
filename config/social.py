@@ -18,6 +18,8 @@ DAILY_LIMITS = {
     "mentor.title": 1,
     "partner.active": 2,
     "partner.dissolved": 1,
+    "natal.bind": 2,
+    "natal.unbind": 1,
     "auction.high_price_sale": 2,
 }
 

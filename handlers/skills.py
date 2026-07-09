@@ -190,6 +190,8 @@ def _eq_text(res: dict) -> str:
         return f"已至强化上限（+{res['level']}）。"
     if s == "equipped":
         return "装备中之物不可分解，请先卸下。"
+    if s == "natal_bound":
+        return "本命法宝已入神魂牵系，不可分解。"
     if s == "no_stone":
         return f"灵石不足（需 {res['need']}，余 {res['have']}）。"
     if s == "no_material":

@@ -12,6 +12,7 @@ from config import daohang as DAOHANG
 from config import realms as R
 from config import buffs as BUFFS
 from config import auction as auction_cfg
+from config import natal as natal_cfg
 from config.items import ITEMS, equipment_slot, item_name, weapon_bonus
 from config.equipment import ENHANCE_PER_LEVEL
 from config.sects import welfare as sect_welfare_config
@@ -44,6 +45,7 @@ class Character:
     weapon_key: str
     debuff_json: dict
     daohang: int
+    natal_instance_id: int = None
     current_hp: int = None   # None ⇒ 视为满（旧档/新建未 materialize）
     current_mp: int = None
     hp_at: int = None        # 气血回复惰性结算锚点；None ⇒ 视为 now
@@ -92,6 +94,8 @@ def _from_row(row, stamina: int = None, stamina_at: int = None) -> Character:
         spirit_stone=row["spirit_stone"], weapon_key=row["weapon_key"],
         debuff_json=json.loads(row["debuff_json"] or "{}"),
         daohang=row["daohang"] if "daohang" in row.keys() else 0,
+        natal_instance_id=(
+            row["natal_instance_id"] if "natal_instance_id" in row.keys() else None),
         current_hp=row["current_hp"], current_mp=row["current_mp"],
         hp_at=row["hp_at"], mp_at=row["mp_at"],
         last_seclusion_start=(
@@ -584,6 +588,7 @@ async def stats(char: Character, equipped: list[dict] = None, pvp: bool = False)
     if equipped:
         for inst in equipped:
             _apply_equipment_bonus(base, pct_bonus, equipment_bonus(inst), inst.get("enhance_level", 0))
+            _apply_natal_bonus(pct_bonus, inst)
         if not equipped_weapon_key(equipped):
             for k, v in weapon_bonus(char.weapon_key).items():
                 base[k] = base.get(k, 0) + v
@@ -686,6 +691,15 @@ def _apply_equipment_bonus(base: dict, pct_bonus: dict, bonus: dict, enhance_lev
                 pct_bonus[stat_key] += float(val)
         else:
             base[key] = base.get(key, 0) + int(val)
+
+
+def _apply_natal_bonus(pct_bonus: dict, inst: dict):
+    level = int(inst.get("natal_level") or 0)
+    if level <= 0:
+        return
+    for stat_key, val in natal_cfg.slot_bonus(equipment_slot(inst["base_key"]), level).items():
+        if stat_key in pct_bonus:
+            pct_bonus[stat_key] += float(val)
 
 
 def _collect_temporary_stat_buffs(base: dict, pct_bonus: dict, state: dict):
@@ -822,6 +836,8 @@ def _instance_from_row(row) -> dict:
         "tier": row["tier"], "equipped_slot": row["equipped_slot"],
         "affixes": json.loads(row["affixes_json"] or "{}"),
         "enhance_level": row["enhance_level"] if "enhance_level" in row.keys() else 0,
+        "natal_level": row["natal_level"] if "natal_level" in row.keys() else 0,
+        "bound": row["bound"] if "bound" in row.keys() else 0,
         "status": row["status"] if "status" in row.keys() else auction_cfg.INSTANCE_STATUS_NORMAL,
     }
 

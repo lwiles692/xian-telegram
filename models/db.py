@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS characters (
     pill_stamina_count  INTEGER NOT NULL DEFAULT 0,
     pill_stamina_day    TEXT,
     big_fail_streak     INTEGER NOT NULL DEFAULT 0,
+    natal_instance_id   INTEGER,
     created_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventory (
@@ -79,8 +80,18 @@ CREATE TABLE IF NOT EXISTS item_instances (
     tier           TEXT NOT NULL,
     affixes_json   TEXT NOT NULL DEFAULT '{}',
     enhance_level  INTEGER NOT NULL DEFAULT 0,
+    natal_level    INTEGER NOT NULL DEFAULT 0,
+    bound          INTEGER NOT NULL DEFAULT 0,
     equipped_slot  TEXT,
     status         TEXT NOT NULL DEFAULT 'normal'
+);
+CREATE TABLE IF NOT EXISTS natal_feed_logs (
+    user_id     INTEGER NOT NULL,
+    instance_id INTEGER NOT NULL,
+    level       INTEGER NOT NULL,
+    cost_json   TEXT NOT NULL DEFAULT '{}',
+    fed_at      INTEGER NOT NULL,
+    PRIMARY KEY (user_id, instance_id, level)
 );
 CREATE TABLE IF NOT EXISTS recipes_known (
     user_id     INTEGER NOT NULL,
@@ -592,6 +603,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "last_seclusion_end", "INTEGER")
     # spec-v3 §8.2：失败保底字段仅供化神→炼虚大突破读取；低境界大突破不读不写。
     await _ensure_column(_conn, "characters", "big_fail_streak", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "characters", "natal_instance_id", "INTEGER")
     # 当前气血/法力（#24）：可空，NULL ⇒ 视为满（旧存档零回填；首次结算按当前 max 落地）。
     # hp_at/mp_at 为各自回复的惰性结算锚点，NULL ⇒ 视为 now（不补算历史回复）。
     await _ensure_column(_conn, "characters", "current_hp", "INTEGER")
@@ -609,6 +621,8 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "pvp_ratings", "week_reputation", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "pvp_ratings", "week_tag", "TEXT")
     await _ensure_column(_conn, "item_instances", "enhance_level", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "item_instances", "natal_level", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "item_instances", "bound", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "item_instances", "status", "TEXT NOT NULL DEFAULT 'normal'")
     await _ensure_column(_conn, "auctions", "created_at", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "auctions", "settled_at", "INTEGER NOT NULL DEFAULT 0")

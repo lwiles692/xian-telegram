@@ -128,6 +128,8 @@ async def decompose(user_id: int, instance_id: int) -> dict:
         inst = lookup["instance"]
         if inst["equipped_slot"]:
             return {"status": "equipped"}
+        if int(inst["bound"] or 0) or int(inst["natal_level"] or 0):
+            return {"status": "natal_bound"}
         qihun = decompose_yield(inst["tier"], inst["enhance_level"])
         await conn.execute(
             "DELETE FROM item_instances WHERE id=? AND user_id=?", (instance_id, user_id))
