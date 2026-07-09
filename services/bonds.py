@@ -519,6 +519,56 @@ async def grant_daily_mentor_transfer(mentor_id: int, disciple_id: int,
             "bond_id": bond["id"], "active_day": day, "cultivation": amount}
 
 
+async def grant_daily_partner_gift(giver_id: int, item_key: str,
+                                   now: int = None) -> dict:
+    """道侣每日互赠：只收绑定白名单物品，赠出后仍为绑定。"""
+    now = _now(now)
+    day = _active_day(now)
+    item_key = str(item_key)
+    if not CFG.is_partner_gift_allowed(item_key):
+        return {"status": "bad_item", "item": item_key}
+    from services import character as character_service
+
+    async with db.transaction() as conn:
+        cur = await conn.execute(
+            "SELECT id, a_id, b_id FROM social_bonds "
+            "WHERE kind=? AND status=? AND (a_id=? OR b_id=?) "
+            "ORDER BY id LIMIT 1",
+            (CFG.KIND_PARTNER, CFG.STATUS_ACTIVE, giver_id, giver_id))
+        bond = await cur.fetchone()
+        await cur.close()
+        if not bond:
+            return {"status": "not_active"}
+        receiver_id = bond["b_id"] if int(bond["a_id"]) == int(giver_id) else bond["a_id"]
+        if int(receiver_id) == int(giver_id):
+            return {"status": "not_active"}
+        have = await character_service.item_qty_conn(conn, giver_id, item_key, bound=1)
+        need = CFG.PARTNER_DAILY_GIFT_QTY
+        if have < need:
+            return {"status": "no_item", "item": item_key, "need": need, "have": have}
+        try:
+            cur = await conn.execute(
+                "INSERT INTO bond_daily_gifts("
+                "bond_kind, a_id, b_id, giver_id, receiver_id, active_day, item_key, qty, granted_at"
+                ") VALUES(?,?,?,?,?,?,?,?,?)",
+                (CFG.KIND_PARTNER, bond["a_id"], bond["b_id"], giver_id, receiver_id,
+                 day, item_key, need, now))
+        except sqlite3.IntegrityError:
+            return {"status": "daily_done", "active_day": day}
+        await cur.close()
+        consumed = await character_service.consume_item_conn(
+            conn, giver_id, item_key, need, bound=1)
+        if not consumed:
+            return {"status": "no_item", "item": item_key, "need": need, "have": 0}
+        await conn.execute(
+            "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,1,?) "
+            "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty=qty+?",
+            (receiver_id, item_key, need, need))
+    return {"status": "ok", "giver_id": giver_id, "receiver_id": receiver_id,
+            "bond_id": bond["id"], "active_day": day, "item": item_key,
+            "qty": need, "bound": 1}
+
+
 async def settle_weekly_mentor_activity(now: int = None) -> dict:
     """T3.6 师父周活跃回报：按 active 徒弟本周活跃日发道行，按周幂等。"""
     now = _now(now)

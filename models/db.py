@@ -337,6 +337,18 @@ CREATE TABLE IF NOT EXISTS bond_daily_transfers (
     granted_at  INTEGER NOT NULL,
     PRIMARY KEY (bond_kind, a_id, b_id, active_day)
 );
+CREATE TABLE IF NOT EXISTS bond_daily_gifts (
+    bond_kind   TEXT NOT NULL,
+    a_id        INTEGER NOT NULL,
+    b_id        INTEGER NOT NULL,
+    giver_id    INTEGER NOT NULL,
+    receiver_id INTEGER NOT NULL,
+    active_day  TEXT NOT NULL,
+    item_key    TEXT NOT NULL,
+    qty         INTEGER NOT NULL DEFAULT 1,
+    granted_at  INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, giver_id, active_day)
+);
 CREATE TABLE IF NOT EXISTS bond_activity_days (
     bond_kind   TEXT NOT NULL,
     a_id        INTEGER NOT NULL,
@@ -357,6 +369,19 @@ CREATE TABLE IF NOT EXISTS bond_weekly_rewards (
     raw_daohang INTEGER NOT NULL DEFAULT 0,
     daohang     INTEGER NOT NULL DEFAULT 0,
     settled_at  INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, a_id, b_id, week)
+);
+CREATE TABLE IF NOT EXISTS partner_weekly_tasks (
+    bond_kind  TEXT NOT NULL,
+    a_id       INTEGER NOT NULL,
+    b_id       INTEGER NOT NULL,
+    week       TEXT NOT NULL,
+    a_done     INTEGER NOT NULL DEFAULT 0,
+    b_done     INTEGER NOT NULL DEFAULT 0,
+    reward_a   INTEGER NOT NULL DEFAULT 0,
+    reward_b   INTEGER NOT NULL DEFAULT 0,
+    settled_at INTEGER,
+    updated_at INTEGER NOT NULL,
     PRIMARY KEY (bond_kind, a_id, b_id, week)
 );
 CREATE TABLE IF NOT EXISTS bond_titles (

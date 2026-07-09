@@ -43,6 +43,21 @@ async def _道侣双行(a_id: int, b_id: int):
         (a_id, b_id, b_id, a_id))
 
 
+async def _激活道侣(a_id: int, b_id: int, now: int) -> dict:
+    from config import bonds as BONDS
+    from services import bonds
+
+    await _备好境界(a_id, f"结缘道友{a_id}", 2)
+    await _备好境界(b_id, f"结缘道友{b_id}", 2)
+    await character.add_item(a_id, BONDS.PARTNER_TOKEN_ITEM, 1, bound=1)
+    pending = await bonds.create_pending_partner_request(a_id, b_id, initiator_id=a_id, now=now)
+    assert pending["status"] == "ok"
+    confirmed = await bonds.confirm_pending_partner_request(
+        pending["bond_id"], confirmer_id=b_id, now=now + 1)
+    assert confirmed["status"] == "ok"
+    return confirmed
+
+
 @pytest.mark.asyncio
 async def test_同心结来自活动商店且互赠白名单不含破境核心丹(temp_db):
     from config import bonds as BONDS
@@ -207,3 +222,65 @@ async def test_结契境界门槛_双方皆需金丹(temp_db):
     assert res["status"] == "realm_low"
     assert res["user_id"] == 5501
     assert res["need_realm"] == BONDS.PARTNER_MIN_REALM
+
+
+@pytest.mark.asyncio
+async def test_道侣每日互赠_只收绑定白名单且赠后仍绑定(temp_db):
+    from config import bonds as BONDS
+    from services import bonds
+
+    now = 60_000
+    await _激活道侣(5601, 5602, now)
+    await character.add_item(5601, "疗伤丹", 1, bound=0)
+
+    unbound_only = await bonds.grant_daily_partner_gift(5601, "疗伤丹", now=now + 10)
+    bad_item = await bonds.grant_daily_partner_gift(5601, "化神丹", now=now + 20)
+    await character.add_item(5601, "疗伤丹", 2, bound=1)
+    first = await bonds.grant_daily_partner_gift(5601, "疗伤丹", now=now + 30)
+
+    assert unbound_only == {"status": "no_item", "item": "疗伤丹",
+                            "need": BONDS.PARTNER_DAILY_GIFT_QTY, "have": 0}
+    assert bad_item == {"status": "bad_item", "item": "化神丹"}
+    assert first["status"] == "ok"
+    assert first["receiver_id"] == 5602
+    assert first["item"] == "疗伤丹"
+    assert first["bound"] == 1
+    assert await character.item_qty(5601, "疗伤丹", bound=0) == 1
+    assert await character.item_qty(5601, "疗伤丹", bound=1) == 1
+    assert await character.item_qty(5602, "疗伤丹", bound=1) == 1
+    assert await character.item_qty(5602, "疗伤丹", bound=0) == 0
+    row = await db.fetchone(
+        "SELECT giver_id, receiver_id, item_key, qty FROM bond_daily_gifts "
+        "WHERE giver_id=?",
+        (5601,))
+    assert dict(row) == {
+        "giver_id": 5601,
+        "receiver_id": 5602,
+        "item_key": "疗伤丹",
+        "qty": BONDS.PARTNER_DAILY_GIFT_QTY,
+    }
+
+
+@pytest.mark.asyncio
+async def test_道侣每日互赠_同日幂等次日可再赠且非道侣不可赠(temp_db):
+    from services import bonds
+
+    now = 70_000
+    await _激活道侣(5701, 5702, now)
+    await _备好境界(5703, "无缘道友5703", 2)
+    await character.add_item(5701, "补灵丹", 3, bound=1)
+    await character.add_item(5703, "补灵丹", 1, bound=1)
+
+    first = await bonds.grant_daily_partner_gift(5701, "补灵丹", now=now + 10)
+    duplicate = await bonds.grant_daily_partner_gift(5701, "补灵丹", now=now + 20)
+    next_day = await bonds.grant_daily_partner_gift(
+        5701, "补灵丹", now=now + 24 * 3600 + 10)
+    no_bond = await bonds.grant_daily_partner_gift(5703, "补灵丹", now=now + 30)
+
+    assert first["status"] == "ok"
+    assert duplicate["status"] == "daily_done"
+    assert next_day["status"] == "ok"
+    assert no_bond["status"] == "not_active"
+    assert await character.item_qty(5701, "补灵丹", bound=1) == 1
+    assert await character.item_qty(5702, "补灵丹", bound=1) == 2
+    assert await character.item_qty(5703, "补灵丹", bound=1) == 1

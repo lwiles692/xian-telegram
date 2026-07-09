@@ -1,10 +1,13 @@
-"""周活动副本配置（v2 M4）。"""
+from __future__ import annotations
+
+"""周活动副本配置（v2 M4 / spec-v3 T4.4）。"""
 
 WEEKLY_DAOHANG_CAP = 300
 RUN_DAOHANG_REWARD = 120
 RUN_STAMINA_COST = 40
 RUN_DURATION_SECONDS = 20 * 60
 ACTIVITY_MATERIAL = "天魔令"
+PARTNER_WEEKLY_TASK_DAOHANG = 30
 
 WEEKLY_THEMES = {
     "tianmo": {"name": "天魔潮", "material": ACTIVITY_MATERIAL},
