@@ -10,7 +10,7 @@ from config.events import ENCOUNTER_RATE, ENCOUNTERS
 from config.maps import MAPS
 from config.realms import realm_label
 from models import db
-from services import activity, character, game_events, sect_war, settle
+from services import activity, bonds as bonds_service, character, game_events, sect_war, settle
 from services.combat import Combatant, simulate
 
 # 历练时长与遭遇密度按难度绑定（#20）：开局即定遭遇计划与时长，结算复用。
@@ -460,6 +460,9 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
     final_hp, _ = settle.regen_resource(combat_hp, max_hp, anchor, now, settle.HP_REGEN_SECONDS_PER_FULL)
     final_mp, _ = settle.regen_resource(combat_mp, max_mp, anchor, now, settle.MP_REGEN_SECONDS_PER_FULL)
     await character.write_vitals(user_id, final_hp, final_mp, now, conn=conn)
+    bond_activity = None
+    if conn is not None:
+        bond_activity = await bonds_service.record_disciple_activity(conn, user_id, now)
     if conn is not None and win:
         payload = {
             "map_key": map_key,
@@ -486,4 +489,5 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
             "battle_hp_before": cur_hp, "battle_hp_after": max(0, player.hp),
             "battle_mp_before": cur_mp, "battle_mp_after": max(0, player.mp),
             "hp_after": final_hp, "mp_after": final_mp,
-            "max_hp": max_hp, "max_mp": max_mp}
+            "max_hp": max_hp, "max_mp": max_mp,
+            "bond_activity": bond_activity}

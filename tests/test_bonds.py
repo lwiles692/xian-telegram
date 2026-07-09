@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import inspect
 import sqlite3
+import time
 
 import pytest
 import pytest_asyncio
 
 from config import realms as R
 from models import db
-from services import character
+from services import character, settle
 
 
 @pytest_asyncio.fixture
@@ -43,6 +44,30 @@ async def _备好师徒资质(mentor_id: int, disciple_id: int):
 async def _备好境界(user_id: int, name: str, realm: int, stage: int | None = None):
     await character.create(user_id, name)
     await character.set_progress(user_id, realm, R.num_stages(realm) - 1 if stage is None else stage, 0)
+
+
+async def _激活师徒(mentor_id: int, disciple_id: int, now: int) -> int:
+    from services import bonds
+
+    await _备好师徒资质(mentor_id, disciple_id)
+    pending = await bonds.create_pending_mentor_request(
+        mentor_id, disciple_id, initiator_id=mentor_id, now=now)
+    assert pending["status"] == "ok"
+    confirmed = await bonds.confirm_pending_mentor_request(
+        pending["bond_id"], confirmer_id=disciple_id, now=now + 1)
+    assert confirmed["status"] == "ok"
+    return pending["bond_id"]
+
+
+class _StableRng:
+    def random(self):
+        return 1.0
+
+    def randint(self, low, high):
+        return low
+
+    def choice(self, values):
+        return values[0]
 
 
 async def _插入羁绊(
@@ -90,6 +115,12 @@ async def _羁绊行(bond_id: int):
     return await db.fetchone("SELECT * FROM social_bonds WHERE id=?", (bond_id,))
 
 
+async def _师徒行(disciple_id: int):
+    return await db.fetchone(
+        "SELECT * FROM social_bonds WHERE kind='mentor' AND b_id=? ORDER BY id DESC LIMIT 1",
+        (disciple_id,))
+
+
 @pytest.mark.asyncio
 async def test_羁绊_schema_重复开库仍成阵(tmp_path):
     path = str(tmp_path / "bonds-schema.db")
@@ -98,6 +129,7 @@ async def test_羁绊_schema_重复开库仍成阵(tmp_path):
     try:
         bond_cols = await _列字典("social_bonds")
         milestone_cols = await _列字典("bond_milestones")
+        transfer_cols = await _列字典("bond_daily_transfers")
         indexes = await _索引字典("social_bonds")
         pending_cols = await _索引列("idx_bonds_pending_expire")
         mentor_cols = await _索引列("idx_bonds_mentor_b")
@@ -111,6 +143,9 @@ async def test_羁绊_schema_重复开库仍成阵(tmp_path):
         "active_days", "last_active_day", "updated_at",
     }
     assert set(milestone_cols) >= {"bond_kind", "a_id", "b_id", "milestone"}
+    assert set(transfer_cols) >= {
+        "bond_kind", "a_id", "b_id", "active_day", "cultivation", "granted_at",
+    }
 
     assert {"idx_bonds_mentor_b", "idx_bonds_partner_a", "idx_bonds_pending_expire",
             "idx_bonds_a", "idx_bonds_b"} <= set(indexes)
@@ -136,6 +171,10 @@ def test_羁绊常量_四十八时辰与七日法度():
     assert BONDS.MAX_ACTIVE_DISCIPLES == 3
     assert BONDS.KIND_MENTOR == "mentor"
     assert BONDS.KIND_PARTNER == "partner"
+    assert BONDS.DISCIPLE_SECLUSION_PCT == 0.05
+    for realm, amount in BONDS.MENTOR_TRANSFER_CULTIVATION_BY_REALM.items():
+        one_hour = settle.seclusion_gain(realm, 0, 0, 3600, root_bone=0)
+        assert amount < one_hour * 0.5
 
 
 @pytest.mark.asyncio
@@ -508,6 +547,167 @@ async def test_重复确认已活跃拜师_返回稳定状态且不改旧时辰(
     assert row["activated_at"] == confirmed_at
     assert row["confirmed_at"] == confirmed_at
     assert row["active_days"] == 0
+
+
+@pytest.mark.asyncio
+async def test_活跃日记录_同日去重跨日递增且解除冻结(temp_db):
+    from services import bonds
+
+    now = 670_000
+    bond_id = await _激活师徒(2101, 2201, now)
+
+    async with db.transaction() as conn:
+        first = await bonds.record_disciple_activity(conn, 2201, now=now + 10)
+        same_day = await bonds.record_disciple_activity(conn, 2201, now=now + 20)
+        today = await bonds.disciple_activity_today(conn, 2201, now=now + 20)
+
+    row = await _羁绊行(bond_id)
+    assert first["recorded"] is True
+    assert same_day["recorded"] is False
+    assert today["active_today"] is True
+    assert row["active_days"] == 1
+    assert row["last_active_day"] == time.strftime(
+        "%Y-%m-%d", time.gmtime(now + 10 + bonds.ACTIVE_DAY_TZ_OFFSET_SECONDS))
+
+    next_day = now + 24 * 3600
+    async with db.transaction() as conn:
+        crossed = await bonds.record_disciple_activity(conn, 2201, now=next_day)
+    row = await _羁绊行(bond_id)
+    assert crossed["recorded"] is True
+    assert row["active_days"] == 2
+
+    dissolved = await bonds.dissolve_active_bond(bond_id, user_id=2101, now=next_day + 10)
+    assert dissolved["status"] == "ok"
+    async with db.transaction() as conn:
+        frozen = await bonds.record_disciple_activity(conn, 2201, now=next_day + 24 * 3600)
+        today = await bonds.disciple_activity_today(conn, 2201, now=next_day + 24 * 3600)
+    row = await _羁绊行(bond_id)
+    assert frozen["recorded"] is False
+    assert today["status"] == "no_active_bond"
+    assert row["active_days"] == 2
+
+
+@pytest.mark.asyncio
+async def test_前台行为挂接_收功历练秘境任务按日入卷(temp_db, monkeypatch):
+    from services import dungeon, explore, game_events, quests
+
+    now = 700_000
+    disciple_id = 2401
+    await _激活师徒(2301, disciple_id, now)
+
+    def fake_simulate(player, mob, **kwargs):
+        return {"winner": player, "log": ["道友出手，妖邪退散。"],
+                "a_hp": player.hp, "d_hp": 0, "rounds": 1, "reason": "defeat"}
+
+    monkeypatch.setattr(explore, "simulate", fake_simulate)
+    monkeypatch.setattr(dungeon, "simulate", fake_simulate)
+
+    await character.start_seclusion(disciple_id, now=now + 60)
+    collected = await character.collect_seclusion(disciple_id, now=now + 3660)
+    row = await _师徒行(disciple_id)
+    assert collected["status"] == "collected"
+    assert collected["bond_activity"]["recorded"] is True
+    assert row["active_days"] == 1
+
+    started = await explore.start(disciple_id, "后山", now=now + 4000, rng=_StableRng())
+    explored = await explore.collect(disciple_id, now=started["finish_at"], rng=_StableRng())
+    row = await _师徒行(disciple_id)
+    assert explored["status"] == "ok"
+    assert explored["win"] is True
+    assert row["active_days"] == 1
+
+    day_two = now + 24 * 3600
+    async with db.transaction() as conn:
+        await game_events.emit_conn(conn, disciple_id, "explore.win", {"amount": 3}, now=day_two)
+    claimed = await quests.claim(disciple_id, "daily_explore", now=day_two)
+    row = await _师徒行(disciple_id)
+    assert claimed["status"] == "ok"
+    assert claimed["bond_activity"]["recorded"] is True
+    assert row["active_days"] == 2
+
+    day_three = now + 2 * 24 * 3600
+    started = await dungeon.start(disciple_id, "lingxi", now=day_three, rng=_StableRng())
+    delved = await dungeon.collect(disciple_id, now=started["finish_at"], rng=_StableRng())
+    row = await _师徒行(disciple_id)
+    assert delved["status"] == "ok"
+    assert delved["cleared"] > 0
+    assert row["active_days"] == 3
+
+
+@pytest.mark.asyncio
+async def test_前台行为挂接_历练秘境败退仍计当日活跃(temp_db, monkeypatch):
+    from services import dungeon, explore
+
+    now = 800_000
+    disciple_id = 2601
+    await _激活师徒(2501, disciple_id, now)
+
+    def fake_loss(player, mob, **kwargs):
+        return {"winner": mob, "log": ["道友一时失手，被迫退回山门。"],
+                "a_hp": 0, "d_hp": mob.hp, "rounds": 1, "reason": "defeat"}
+
+    monkeypatch.setattr(explore, "simulate", fake_loss)
+    monkeypatch.setattr(dungeon, "simulate", fake_loss)
+
+    started = await explore.start(disciple_id, "后山", now=now + 100, rng=_StableRng())
+    explored = await explore.collect(disciple_id, now=started["finish_at"], rng=_StableRng())
+    row = await _师徒行(disciple_id)
+    assert explored["status"] == "ok"
+    assert explored["win"] is False
+    assert explored["bond_activity"]["recorded"] is True
+    assert row["active_days"] == 1
+
+    next_day = now + 24 * 3600
+    started = await dungeon.start(disciple_id, "lingxi", now=next_day, rng=_StableRng())
+    delved = await dungeon.collect(disciple_id, now=started["finish_at"], rng=_StableRng())
+    row = await _师徒行(disciple_id)
+    assert delved["status"] == "ok"
+    assert delved["cleared"] == 0
+    assert delved["bond_activity"]["recorded"] is True
+    assert row["active_days"] == 2
+
+
+@pytest.mark.asyncio
+async def test_每日传功_需徒弟今日活跃且每对每日一次(temp_db):
+    from config import bonds as BONDS
+    from services import bonds
+
+    now = 900_000
+    mentor_id, disciple_id = 2701, 2801
+    await _激活师徒(mentor_id, disciple_id, now)
+    before = await character.get(disciple_id)
+
+    inactive = await bonds.grant_daily_mentor_transfer(
+        mentor_id, disciple_id, now=now + 10)
+    assert inactive["status"] == "inactive_today"
+
+    async with db.transaction() as conn:
+        recorded = await bonds.record_disciple_activity(conn, disciple_id, now=now + 20)
+    assert recorded["recorded"] is True
+
+    first = await bonds.grant_daily_mentor_transfer(
+        mentor_id, disciple_id, now=now + 30)
+    after_first = await character.get(disciple_id)
+    assert first["status"] == "ok"
+    assert first["cultivation"] == BONDS.MENTOR_TRANSFER_CULTIVATION_BY_REALM[before.realm]
+    assert after_first.cultivation == before.cultivation + first["cultivation"]
+
+    duplicate = await bonds.grant_daily_mentor_transfer(
+        mentor_id, disciple_id, now=now + 40)
+    assert duplicate["status"] == "daily_done"
+    after_duplicate = await character.get(disciple_id)
+    assert after_duplicate.cultivation == after_first.cultivation
+
+    next_day = now + 24 * 3600
+    async with db.transaction() as conn:
+        recorded = await bonds.record_disciple_activity(conn, disciple_id, now=next_day)
+    assert recorded["recorded"] is True
+
+    second = await bonds.grant_daily_mentor_transfer(
+        mentor_id, disciple_id, now=next_day + 10)
+    after_second = await character.get(disciple_id)
+    assert second["status"] == "ok"
+    assert after_second.cultivation == after_first.cultivation + second["cultivation"]
 
 
 def test_羁绊过期任务_已挂入调度器():

@@ -326,6 +326,15 @@ CREATE TABLE IF NOT EXISTS bond_milestones (
     claimed_at INTEGER NOT NULL,
     PRIMARY KEY (bond_kind, a_id, b_id, milestone)
 );
+CREATE TABLE IF NOT EXISTS bond_daily_transfers (
+    bond_kind   TEXT NOT NULL,
+    a_id        INTEGER NOT NULL,
+    b_id        INTEGER NOT NULL,
+    active_day  TEXT NOT NULL,
+    cultivation INTEGER NOT NULL DEFAULT 0,
+    granted_at  INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, a_id, b_id, active_day)
+);
 CREATE INDEX IF NOT EXISTS idx_bonds_a
 ON social_bonds(a_id, kind, status);
 CREATE INDEX IF NOT EXISTS idx_bonds_b

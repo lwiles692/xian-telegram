@@ -17,7 +17,7 @@ from config.sects import welfare as sect_welfare_config
 from config.skills import (COMBAT_SLOTS, MIND_SLOT, SKILLS, STARTER_MIND, STARTER_SKILL,
                            is_mind_skill, skill_bonus)
 from models import db
-from services import activity, settle
+from services import activity, bonds as bonds_service, settle
 from services import ascension, dao_path, sect_war
 
 SPIRIT_ROOTS = ["天灵根", "金灵根", "木灵根", "水灵根", "火灵根",
@@ -120,6 +120,24 @@ def raw_temporary_seclusion_pct(state: dict, now: int = None) -> float:
 
 def clamp_seclusion_pct(pct: float) -> float:
     return min(BUFFS.SECLUSION_PCT_CAP, max(0.0, float(pct)))
+
+
+async def _seclusion_bonus_context_conn(conn, user_id: int, welfare: dict,
+                                        state: dict, path_bonus: dict,
+                                        asc_bonus: dict, outpost: dict,
+                                        now: int) -> dict:
+    disciple_pct = await bonds_service.active_disciple_seclusion_pct_conn(conn, user_id)
+    raw_pct = (
+        float(welfare["seclusion_pct"])
+        + raw_temporary_seclusion_pct(state, now)
+        + float(path_bonus.get("seclusion_pct", 0))
+        + float(asc_bonus.get("seclusion_pct", 0))
+        + float(outpost.get("seclusion_pct", 0))
+        + disciple_pct
+    )
+    applied_pct = clamp_seclusion_pct(raw_pct)
+    return {"raw_pct": raw_pct, "applied_pct": applied_pct,
+            "capped": raw_pct > applied_pct, "disciple_pct": disciple_pct}
 
 
 def _seclusion_remainder(state: dict, realm: int, stage: int) -> int:
@@ -371,12 +389,9 @@ async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
                 path_bonus = await dao_path.active_bonuses(user_id)
                 asc_bonus = await ascension.passive_bonuses(user_id)
                 outpost = await sect_war.bonuses_for_user(user_id)
-                place_factor = 1 + clamp_seclusion_pct(
-                    welfare["seclusion_pct"]
-                    + raw_temporary_seclusion_pct(state, now)
-                    + float(path_bonus.get("seclusion_pct", 0))
-                    + float(asc_bonus.get("seclusion_pct", 0))
-                    + float(outpost.get("seclusion_pct", 0)))
+                seclusion_bonus = await _seclusion_bonus_context_conn(
+                    conn, user_id, welfare, state, path_bonus, asc_bonus, outpost, now)
+                place_factor = 1 + seclusion_bonus["applied_pct"]
                 windows = await activity.windows_for(user_id, settle_start, now, conn=conn)
                 auto_gain, remainder = settle.seclusion_gain_with_remainder(
                     row["realm"], row["stage"], settle_start, now,
@@ -1008,12 +1023,9 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
         path_bonus = await dao_path.active_bonuses(user_id)
         asc_bonus = await ascension.passive_bonuses(user_id)
         outpost = await sect_war.bonuses_for_user(user_id)
-        place_factor = 1 + clamp_seclusion_pct(
-            welfare["seclusion_pct"]
-            + raw_temporary_seclusion_pct(state, now)
-            + float(path_bonus.get("seclusion_pct", 0))
-            + float(asc_bonus.get("seclusion_pct", 0))
-            + float(outpost.get("seclusion_pct", 0)))
+        seclusion_bonus = await _seclusion_bonus_context_conn(
+            conn, user_id, welfare, state, path_bonus, asc_bonus, outpost, now)
+        place_factor = 1 + seclusion_bonus["applied_pct"]
         cap_seconds = (settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"]) * 3600
         window_end = min(now, int(row["seclusion_at"]) + cap_seconds)
         windows = await activity.windows_for(user_id, row["seclusion_at"], window_end, conn=conn)
@@ -1039,6 +1051,7 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
             "seclusion_at=NULL, debuff_json=? "
             "WHERE user_id=?",
             (new_cult, daohang, stamina, stamina_at, json.dumps(state, ensure_ascii=False), user_id))
+        bond_activity = await bonds_service.record_disciple_activity(conn, user_id, now)
         cost = R.advance_cost(row["realm"], row["stage"])
         overflow = _overflow_status_payload(
             row["realm"], row["stage"], new_cult, now, grace_until)
@@ -1047,7 +1060,12 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
                 "cost": cost, "can_advance": new_cult >= cost,
                 "minutes": max(0, (now - row["seclusion_at"]) // 60),
                 "overflow": overflow,
-                "overflow_notice": overflow_grace_notice_text(grace_until) if overflow["active"] else ""}
+                "overflow_notice": overflow_grace_notice_text(grace_until) if overflow["active"] else "",
+                "bond_activity": bond_activity,
+                "seclusion_pct": seclusion_bonus["applied_pct"],
+                "seclusion_pct_raw": seclusion_bonus["raw_pct"],
+                "seclusion_cap_reached": seclusion_bonus["capped"],
+                "disciple_seclusion_pct": seclusion_bonus["disciple_pct"]}
 
 
 async def _grant_reward_conn(conn, user_id: int, stone: int = 0,

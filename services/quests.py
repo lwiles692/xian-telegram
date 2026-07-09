@@ -6,7 +6,7 @@ import time
 from config.items import item_name
 from config.quests import ACHIEVEMENTS, QUESTS
 from models import db
-from services import character
+from services import bonds as bonds_service, character
 
 
 def _day(ts: int) -> str:
@@ -124,7 +124,9 @@ async def claim(user_id: int, quest_key: str, now: int = None) -> dict:
             "UPDATE quest_progress SET claimed=1 WHERE user_id=? AND quest_key=? AND period=?",
             (user_id, quest_key, period))
         await _grant_reward_conn(conn, user_id, quest.get("reward", {}))
-    return {"status": "ok", "quest": quest["name"], "reward": quest.get("reward", {})}
+        bond_activity = await bonds_service.record_disciple_activity(conn, user_id, now)
+    return {"status": "ok", "quest": quest["name"], "reward": quest.get("reward", {}),
+            "bond_activity": bond_activity}
 
 
 def reward_text(reward: dict) -> str:

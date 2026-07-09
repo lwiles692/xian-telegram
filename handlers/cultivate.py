@@ -25,6 +25,8 @@ def _collect_text(res: dict) -> str:
         lines.append(f"溢出分流：{overflow['label']}")
     if res.get("overflow_notice"):
         lines.append(res["overflow_notice"])
+    if res.get("seclusion_cap_reached"):
+        lines.append("已达闭关增益上限，超出的传承与灵效暂化作稳固根基。")
     if res["can_advance"]:
         lines.append("✨ 修为已足，可尝试突破！")
     return "\n".join(lines)

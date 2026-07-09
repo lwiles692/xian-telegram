@@ -11,10 +11,15 @@ from config import realms as R
 from models import db
 
 log = logging.getLogger("xian.bonds")
+ACTIVE_DAY_TZ_OFFSET_SECONDS = 8 * 3600
 
 
 def _now(now: int = None) -> int:
     return int(time.time()) if now is None else int(now)
+
+
+def _active_day(now: int) -> str:
+    return time.strftime("%Y-%m-%d", time.gmtime(int(now) + ACTIVE_DAY_TZ_OFFSET_SECONDS))
 
 
 async def expire_pending(now: int = None) -> dict:
@@ -201,6 +206,95 @@ async def dissolve_active_bond(bond_id: int, user_id: int, now: int = None) -> d
             return {"status": "not_active", "bond_status": CFG.STATUS_DISSOLVED}
     return {"status": "ok", "bond_id": int(bond_id),
             "cooldown_until": now + CFG.DISSOLVE_COOLDOWN_SECONDS}
+
+
+async def record_disciple_activity(conn, user_id: int, now: int = None) -> dict:
+    """记录徒弟当日首个前台行为；同日去重，解除后冻结（spec-v3 §8.2）。"""
+    now = _now(now)
+    day = _active_day(now)
+    cur = await conn.execute(
+        "UPDATE social_bonds SET active_days=active_days+1, last_active_day=?, updated_at=? "
+        "WHERE kind=? AND b_id=? AND status=? "
+        "AND (last_active_day IS NULL OR last_active_day<>?)",
+        (day, now, CFG.KIND_MENTOR, user_id, CFG.STATUS_ACTIVE, day))
+    changed = cur.rowcount
+    await cur.close()
+    return {"status": "ok", "recorded": bool(changed), "active_day": day}
+
+
+async def disciple_activity_today(conn, user_id: int, now: int = None) -> dict:
+    """读取徒弟今日是否已有前台活跃；传功与活跃天数共用此判定。"""
+    now = _now(now)
+    day = _active_day(now)
+    cur = await conn.execute(
+        "SELECT id, a_id, b_id, active_days, last_active_day FROM social_bonds "
+        "WHERE kind=? AND b_id=? AND status=? LIMIT 1",
+        (CFG.KIND_MENTOR, user_id, CFG.STATUS_ACTIVE))
+    row = await cur.fetchone()
+    await cur.close()
+    if not row:
+        return {"status": "no_active_bond", "active_today": False, "active_day": day}
+    return {"status": "ok", "active_today": row["last_active_day"] == day,
+            "active_day": day, "bond_id": row["id"], "mentor_id": row["a_id"],
+            "disciple_id": row["b_id"], "active_days": row["active_days"]}
+
+
+async def active_disciple_seclusion_pct_conn(conn, user_id: int) -> float:
+    """active 徒弟出师前闭关效率加成；后续出师状态接入时在此统一排除。"""
+    cur = await conn.execute(
+        "SELECT 1 FROM social_bonds WHERE kind=? AND b_id=? AND status=? LIMIT 1",
+        (CFG.KIND_MENTOR, user_id, CFG.STATUS_ACTIVE))
+    row = await cur.fetchone()
+    await cur.close()
+    return CFG.DISCIPLE_SECLUSION_PCT if row else 0.0
+
+
+async def grant_daily_mentor_transfer(mentor_id: int, disciple_id: int,
+                                      now: int = None) -> dict:
+    """师父每日传功：徒弟今日已前台活跃后，每对师徒每日一次。"""
+    now = _now(now)
+    day = _active_day(now)
+    from services import character as character_service
+
+    async with db.transaction() as conn:
+        cur = await conn.execute(
+            "SELECT id FROM social_bonds "
+            "WHERE kind=? AND a_id=? AND b_id=? AND status=? LIMIT 1",
+            (CFG.KIND_MENTOR, mentor_id, disciple_id, CFG.STATUS_ACTIVE))
+        bond = await cur.fetchone()
+        await cur.close()
+        if not bond:
+            return {"status": "not_active"}
+
+        activity = await disciple_activity_today(conn, disciple_id, now)
+        if not activity["active_today"]:
+            return {"status": "inactive_today", "active_day": day}
+
+        cur = await conn.execute(
+            "SELECT realm FROM characters WHERE user_id=?",
+            (disciple_id,))
+        disciple = await cur.fetchone()
+        await cur.close()
+        if not disciple:
+            return {"status": "missing"}
+        realm = int(disciple["realm"])
+        amount = int(CFG.MENTOR_TRANSFER_CULTIVATION_BY_REALM.get(realm, 0))
+        if amount <= 0:
+            return {"status": "disciple_realm_high", "realm": realm}
+
+        try:
+            cur = await conn.execute(
+                "INSERT INTO bond_daily_transfers("
+                "bond_kind, a_id, b_id, active_day, cultivation, granted_at"
+                ") VALUES(?,?,?,?,?,?)",
+                (CFG.KIND_MENTOR, mentor_id, disciple_id, day, amount, now))
+        except sqlite3.IntegrityError:
+            return {"status": "daily_done", "active_day": day}
+        await cur.close()
+        await character_service._grant_reward_conn(
+            conn, disciple_id, cultivation=amount)
+    return {"status": "ok", "mentor_id": mentor_id, "disciple_id": disciple_id,
+            "bond_id": bond["id"], "active_day": day, "cultivation": amount}
 
 
 async def _bond_row_conn(conn, bond_id: int):

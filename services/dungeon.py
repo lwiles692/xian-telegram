@@ -8,7 +8,7 @@ from config import daohang as DAOHANG
 from config import realms as R
 from config.dungeons import DUNGEONS
 from config.items import ITEMS, item_name
-from services import activity, character, game_events, sect_war, settle
+from services import activity, bonds as bonds_service, character, game_events, sect_war, settle
 from services.combat import Combatant, simulate
 from models import db
 
@@ -255,6 +255,9 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
     final_hp, _ = settle.regen_resource(combat_hp, max_hp, anchor, now, settle.HP_REGEN_SECONDS_PER_FULL)
     final_mp, _ = settle.regen_resource(combat_mp, max_mp, anchor, now, settle.MP_REGEN_SECONDS_PER_FULL)
     await character.write_vitals(user_id, final_hp, final_mp, now, conn=conn)
+    bond_activity = None
+    if conn is not None:
+        bond_activity = await bonds_service.record_disciple_activity(conn, user_id, now)
     if conn is not None and cleared:
         payload = {"dungeon_key": dungeon_key, "dungeon": d["name"],
                    "cleared": cleared, "layers": d["layers"], "amount": cleared}
@@ -273,4 +276,5 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
             "battle_hp_before": cur_hp, "battle_hp_after": max(0, player.hp),
             "battle_mp_before": cur_mp, "battle_mp_after": max(0, player.mp),
             "hp_after": final_hp, "mp_after": final_mp,
-            "max_hp": max_hp, "max_mp": max_mp}
+            "max_hp": max_hp, "max_mp": max_mp,
+            "bond_activity": bond_activity}
