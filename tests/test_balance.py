@@ -465,6 +465,33 @@ def test_all_realms_content_value_including_drops_under_first_buy():
             f"r{r} 含掉落产出 {value:.1f} 未低于首买 {cost:.1f}，反套利红线失守")
 
 
+def test_auction_whitelist_material_values_stay_under_buy_margin():
+    """spec-v3 T1.5：白名单材料按玩家市场估值后，仍不得打穿买精力刷钱红线。"""
+    from services import shop
+
+    assert {"天外残玉", "雾泽虚砂", "裂海空髓", "混沌残核"} <= B.AUCTION_WHITELIST_MATERIALS
+    assert B.AUCTION_WHITELIST_REALMS == (4, 5)
+    for r in B.AUCTION_WHITELIST_REALMS:
+        cap = shop.first_buy_cost_per_stamina(r) * 0.75
+        value = B.best_content_market_value_per_stamina(r)
+        assert value < cap, (
+            f"r{r} 白名单折算产出 {value:.1f} 未低于首买75%红线 {cap:.1f}")
+
+
+def test_lianxu_daily_loop_stamina_and_market_value_are_self_consistent():
+    """spec-v3 M1 DoD：三图+虚空神殿×2+炼虚Boss的日常精力与白名单材料价值自洽。"""
+    profile = B.lianxu_daily_loop_profile()
+
+    assert profile["daily_stamina"] == (
+        sum(B.MAPS[key]["stamina"] for key in ("太初雾泽", "虚空裂海", "混沌古狱"))
+        + B.DUNGEONS["xukong"]["stamina"] * 2
+        + B.WORLD_BOSSES["lianxu"]["stamina"]
+    )
+    assert profile["daily_stamina"] <= profile["stamina_cap"]
+    assert profile["max_repeatable_value"] < profile["value_cap"]
+    assert profile["max_daily_value"] < profile["value_cap"]
+
+
 def test_dungeon_value_subtracts_entry_and_keeps_drops_unscaled():
     """秘境反套利口径：扣入场费；drops 不受 reward_factor 放大（复刻 _resolve 仅 stone/cult 放大）。"""
     xuanming = B.DUNGEONS["xuanming"]

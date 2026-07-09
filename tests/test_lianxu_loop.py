@@ -62,9 +62,11 @@ def test_xukong_dungeon_economy_stays_under_lianxu_buy_margin():
     cap = shop.first_buy_cost_per_stamina(5) * 0.75
     stone = B.dungeon_stone_per_stamina("xukong")
     value = stone + B.dungeon_drops_sell_per_stamina("xukong")
+    market_value = stone + B.dungeon_drops_market_per_stamina("xukong")
 
     assert stone < cap
     assert value < cap
+    assert market_value < cap
     assert B.best_content_value_per_stamina(5) < shop.first_buy_cost_per_stamina(5)
 
 

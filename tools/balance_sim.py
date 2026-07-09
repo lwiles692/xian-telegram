@@ -398,28 +398,63 @@ def best_content_stone_per_stamina(realm: int) -> float:
 # 活动道行 / 飞升点为另一维产出，靠周上限与硬上限封顶。三者均须显式校验
 # 不破坏"内容产出/精力 < 首买精力成本/精力"的反套利红线。
 
-def _drops_sell_expectation(drops) -> float:
-    """drops [(key, weight, qmin, qmax)] 的单次期望 sell 价值。
+AUCTION_WHITELIST_MATERIALS = frozenset({
+    "星陨砂", "幽都魂晶", "天外残玉",
+    "雾泽虚砂", "裂海空髓", "混沌残核",
+})
+AUCTION_WHITELIST_REALMS = (4, 5)
+WHITELIST_MARKET_VALUE_MULTIPLIER = 3.0
+
+
+def auction_material_value(key: str) -> float:
+    """M1/T1.5 白名单材料估值：按 NPC 回收价三倍折算玩家市场价格。"""
+    sell = float(ITEMS.get(key, {}).get("sell", 0) or 0)
+    if key in AUCTION_WHITELIST_MATERIALS:
+        return sell * WHITELIST_MARKET_VALUE_MULTIPLIER
+    return sell
+
+
+def _drops_value_expectation(drops, value_fn) -> float:
+    """drops [(key, weight, qmin, qmax)] 的单次期望变现价值。
 
     复刻 explore._roll_drops：weight/100 为掉率，数量 randint(qmin,qmax) 取均值。
-    绑定材料 sell=0 自然不计入（不构成可变现产出）。
+    绑定材料 value=0 自然不计入（不构成可变现产出）。
     """
     total = 0.0
     for key, weight, qmin, qmax in drops:
         chance = min(100.0, float(weight)) / 100.0
-        sell = float(ITEMS.get(key, {}).get("sell", 0) or 0)
-        total += chance * (qmin + qmax) / 2 * sell
+        total += chance * (qmin + qmax) / 2 * float(value_fn(key))
     return total
+
+
+def _drops_sell_expectation(drops) -> float:
+    """drops 的单次期望 NPC 回收价值。"""
+    return _drops_value_expectation(drops, lambda key: ITEMS.get(key, {}).get("sell", 0) or 0)
+
+
+def _drops_market_expectation(drops) -> float:
+    """drops 的单次期望玩家市场价值；白名单材料按 T1.5 保守估值。"""
+    return _drops_value_expectation(drops, auction_material_value)
 
 
 def map_drops_sell_per_stamina(map_key: str) -> float:
     return _drops_sell_expectation(MAPS[map_key]["drops"]) / MAPS[map_key]["stamina"]
 
 
+def map_drops_market_per_stamina(map_key: str) -> float:
+    return _drops_market_expectation(MAPS[map_key]["drops"]) / MAPS[map_key]["stamina"]
+
+
 def dungeon_drops_sell_per_stamina(dungeon_key: str) -> float:
     """秘境掉落 sell/精力：drops 不受 reward_factor 放大（复刻 _resolve：仅 stone/cult 放大）。"""
     d = DUNGEONS[dungeon_key]
     return _drops_sell_expectation(d["drops"]) / d["stamina"]
+
+
+def dungeon_drops_market_per_stamina(dungeon_key: str) -> float:
+    """秘境掉落市场价值/精力：drops 不受 reward_factor 放大，白名单材料按保守成交价。"""
+    d = DUNGEONS[dungeon_key]
+    return _drops_market_expectation(d["drops"]) / d["stamina"]
 
 
 def best_content_value_per_stamina(realm: int) -> float:
@@ -429,6 +464,63 @@ def best_content_value_per_stamina(realm: int) -> float:
     vals += [dungeon_stone_per_stamina(k) + dungeon_drops_sell_per_stamina(k)
              for k, d in DUNGEONS.items() if d["realm"] <= realm]
     return max(vals) if vals else 0.0
+
+
+def world_boss_drops_market_value(boss_key: str) -> float:
+    """世界 Boss 击杀总掉落的玩家市场估值；按整只 Boss 奖池折算。"""
+    return sum(auction_material_value(key) * int(qty)
+               for key, qty in WORLD_BOSSES[boss_key]["drops"].items())
+
+
+def world_boss_value_per_stamina(boss_key: str, realm: int, stage: int,
+                                 n: int = 120, profile=GEARED) -> float:
+    """世界 Boss 按击杀总挑战数折算的单精力价值，用于日常项审计。"""
+    cfg = WORLD_BOSSES[boss_key]
+    challenges = world_boss_kill_challenges(boss_key, realm, stage, n=n, profile=profile)
+    total_value = cfg["stone_pool"] + world_boss_drops_market_value(boss_key)
+    return total_value / max(1.0, challenges * cfg["stamina"])
+
+
+def best_content_market_value_per_stamina(realm: int) -> float:
+    """白名单材料按玩家市场估值后，图/秘境/世界 Boss 的最佳产出/精力。"""
+    vals = [map_stone_per_stamina(k) + map_drops_market_per_stamina(k)
+            for k, m in MAPS.items() if m["realm"] <= realm]
+    vals += [dungeon_stone_per_stamina(k) + dungeon_drops_market_per_stamina(k)
+             for k, d in DUNGEONS.items() if d["realm"] <= realm]
+    vals += [world_boss_value_per_stamina(
+        k, b["realm"], min(2, R.num_stages(b["realm"]) - 1),
+        profile=LIANXU_GEARED if b["realm"] == 5 else HUASHEN_GEARED if b["realm"] == 4 else GEARED)
+        for k, b in WORLD_BOSSES.items() if b["realm"] <= realm]
+    return max(vals) if vals else 0.0
+
+
+def lianxu_daily_loop_profile() -> dict:
+    """M1/T1.5 炼虚日常闭环：三图各一次、虚空神殿两次、炼虚 Boss 一次。"""
+    from services import shop
+    map_keys = ("太初雾泽", "虚空裂海", "混沌古狱")
+    map_values = {
+        key: map_stone_per_stamina(key) + map_drops_market_per_stamina(key)
+        for key in map_keys
+    }
+    xukong_value = dungeon_stone_per_stamina("xukong") + dungeon_drops_market_per_stamina("xukong")
+    boss_value = world_boss_value_per_stamina("lianxu", 5, 2, n=120, profile=LIANXU_GEARED)
+    daily_stamina = (
+        sum(MAPS[key]["stamina"] for key in map_keys)
+        + DUNGEONS["xukong"]["stamina"] * DUNGEONS["xukong"]["daily_limit"]
+        + WORLD_BOSSES["lianxu"]["stamina"]
+    )
+    first_buy = shop.first_buy_cost_per_stamina(5)
+    return {
+        "stamina_cap": R.STAMINA_CAP[5],
+        "daily_stamina": daily_stamina,
+        "first_buy": first_buy,
+        "value_cap": first_buy * 0.75,
+        "map_values": map_values,
+        "xukong_value": xukong_value,
+        "boss_value": boss_value,
+        "max_repeatable_value": max((*map_values.values(), xukong_value)),
+        "max_daily_value": max((*map_values.values(), xukong_value, boss_value)),
+    }
 
 
 def activity_daohang_profile() -> dict:
@@ -647,6 +739,10 @@ def report() -> None:
     lianxu_boss = world_boss_kill_challenges("lianxu", 5, 2, n=120, profile=LIANXU_GEARED)
     print(f"  虚空神殿 入门{xukong_entry*100:5.1f}% 圆满{xukong_full*100:5.1f}%"
           f"  吞虚魔蟒≈{lianxu_boss:5.1f}次")
+    daily = lianxu_daily_loop_profile()
+    print(f"  T1.5日常闭环 精力{daily['daily_stamina']}/{daily['stamina_cap']}"
+          f" 可重复最高{daily['max_repeatable_value']:5.1f}/{daily['value_cap']:5.1f}"
+          f" Boss折算{daily['boss_value']:5.1f}")
     print("=" * 78)
     print("世界 Boss 单次伤害 & 击杀所需挑战次数(满配)")
     for bkey, cfg in WORLD_BOSSES.items():
@@ -675,6 +771,15 @@ def report() -> None:
         flag = "  ✅堵住" if cost_per > best else "  ⚠️套利"
         print(f"  {R.REALM_NAMES[r]:<6} 含掉落最佳 {best:6.1f} 灵石/精力   "
               f"首买成本 {cost_per:6.1f} 灵石/精力{flag}")
+    print(f"  白名单材料估值: {WHITELIST_MARKET_VALUE_MULTIPLIER:.0f}倍NPC回收价 "
+          f"{sorted(AUCTION_WHITELIST_MATERIALS)}")
+    for r in AUCTION_WHITELIST_REALMS:
+        best = best_content_market_value_per_stamina(r)
+        cost_per = shop.first_buy_cost_per_stamina(r)
+        cap = cost_per * 0.75
+        flag = "  ✅堵住" if best < cap else "  ⚠️越线"
+        print(f"  {R.REALM_NAMES[r]:<6} 白名单折算 {best:6.1f} 灵石/精力   "
+              f"75%红线 {cap:6.1f}{flag}")
     act = activity_daohang_profile()
     print(f"  活动道行限流: 周上限{act['weekly_cap']} 单次{act['per_run']}/精力{act['stamina_per_run']} "
           f"满档需{act['runs_to_cap']}次 {'✅有上限' if act['capped'] else '⚠️无上限'}")
