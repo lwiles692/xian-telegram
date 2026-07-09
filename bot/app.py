@@ -16,7 +16,8 @@ from handlers import (ascension, auction, bag, boss, craft, cultivate, daily, da
 from handlers.common import cleanup_callback_tokens
 from models import db
 from handlers import quest
-from services import activity, character, notifications, season, social, world_boss
+from services import (activity, bonds as bonds_service, character, notifications,
+                      season, social, world_boss)
 from services import auction as auction_service
 from services import market as market_service
 from services import pvp as pvp_service
@@ -85,6 +86,7 @@ async def main():
     # 月末 23:45 结算据点战赛季：积分最高宗门夺魁，成员得绑定道行（幂等，spec §8.1）。
     scheduler.add_job(sect_war_service.settle_season, "cron", day="last", hour=23, minute=45)
     scheduler.add_job(cleanup_callback_tokens, "interval", hours=1)
+    scheduler.add_job(bonds_service.expire_pending, "interval", hours=1)
     scheduler.add_job(market_service.notify_recent_listings, "interval", hours=1, args=[bot])
     scheduler.add_job(auction_service.notify_recent_auctions, "interval", hours=1, args=[bot])
     scheduler.add_job(activity.cleanup, "interval", hours=6)

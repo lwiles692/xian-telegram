@@ -302,6 +302,41 @@ CREATE TABLE IF NOT EXISTS path_events (
     amount      INTEGER NOT NULL DEFAULT 0,
     created_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS social_bonds (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL,
+    a_id            INTEGER NOT NULL,
+    b_id            INTEGER NOT NULL,
+    status          TEXT NOT NULL,
+    active_days     INTEGER NOT NULL DEFAULT 0,
+    last_active_day TEXT,
+    created_at      INTEGER NOT NULL,
+    expires_at      INTEGER,
+    activated_at    INTEGER,
+    confirmed_at    INTEGER,
+    dissolved_at    INTEGER,
+    updated_at      INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS bond_milestones (
+    bond_kind  TEXT NOT NULL,
+    a_id       INTEGER NOT NULL,
+    b_id       INTEGER NOT NULL,
+    milestone  TEXT NOT NULL,
+    claimed_at INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, a_id, b_id, milestone)
+);
+CREATE INDEX IF NOT EXISTS idx_bonds_a
+ON social_bonds(a_id, kind, status);
+CREATE INDEX IF NOT EXISTS idx_bonds_b
+ON social_bonds(b_id, kind, status);
+CREATE INDEX IF NOT EXISTS idx_bonds_mentor_a
+ON social_bonds(kind, a_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bonds_mentor_b
+ON social_bonds(b_id)
+WHERE kind='mentor' AND status IN ('pending', 'active');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bonds_partner_a
+ON social_bonds(a_id)
+WHERE kind='partner' AND status IN ('pending', 'active');
 CREATE TABLE IF NOT EXISTS ascension (
     user_id     INTEGER PRIMARY KEY,
     level       INTEGER NOT NULL DEFAULT 0,
@@ -486,6 +521,15 @@ async def init_db(path: str = None):
     await _conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_auctions_audit_sold "
         "ON auctions(status, settled_at, seller_id, current_bidder)")
+    await _ensure_column(_conn, "social_bonds", "expires_at", "INTEGER")
+    await _ensure_column(_conn, "social_bonds", "activated_at", "INTEGER")
+    await _ensure_column(_conn, "social_bonds", "confirmed_at", "INTEGER")
+    await _ensure_column(_conn, "social_bonds", "dissolved_at", "INTEGER")
+    await _ensure_column(_conn, "social_bonds", "active_days", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "social_bonds", "last_active_day", "TEXT")
+    await _conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bonds_pending_expire "
+        "ON social_bonds(kind, status, expires_at)")
     await _ensure_column(_conn, "sect_members", "donate_day", "TEXT")
     await _ensure_column(_conn, "sect_members", "donate_today", "INTEGER NOT NULL DEFAULT 0")
     # 迁移时留空(NULL)而非填默认值，使部署前的在途历练落入 _resolve 的"旧 run"兼容分支
