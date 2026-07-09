@@ -79,6 +79,13 @@ async def main():
     bot = Bot(token=token)
     scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
     scheduler.add_job(world_boss.scheduled_spawn, "cron", hour=20, minute=0, args=[bot])
+    # 周日 23:40 被动结算师父周活跃回报，错开 PvP/赛季/宗门战结算（spec-v3 §4.3）。
+    scheduler.add_job(
+        bonds_service.settle_weekly_mentor_activity,
+        "cron",
+        day_of_week="sun",
+        hour=23,
+        minute=40)
     # 周日 23:55（仍属当周 %W）结算 PvP 周榜奖池（#14）。
     scheduler.add_job(pvp_service.settle_weekly, "cron", day_of_week="sun", hour=23, minute=55)
     # 月末 23:50 结算月赛季：向天梯参与者发绑定称号 + 道行（幂等，#A2）。

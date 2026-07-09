@@ -361,6 +361,28 @@ async def grant_regular_daohang_conn(conn, user_id: int, amount: int, event_type
     return grant
 
 
+async def grant_overflow_capped_daohang_conn(conn, user_id: int, amount: int,
+                                             event_type: str, now: int = None) -> int:
+    """按溢出道行 600 周上限发放道行，供被动周期奖励复用同一计量口径。"""
+    now = int(time.time()) if now is None else now
+    amount = int(amount or 0)
+    if amount <= 0:
+        return 0
+    cur = await conn.execute("SELECT 1 FROM characters WHERE user_id=?", (user_id,))
+    row = await cur.fetchone()
+    await cur.close()
+    if not row:
+        return 0
+    grant = await _cap_overflow_daohang(conn, user_id, amount, now)
+    if grant <= 0:
+        return 0
+    await conn.execute(
+        "UPDATE characters SET daohang=daohang+? WHERE user_id=?",
+        (grant, user_id))
+    await _add_daohang_event(conn, user_id, grant, event_type, now)
+    return grant
+
+
 async def grant_regular_daohang(user_id: int, amount: int, event_type: str,
                                 now: int = None, realm: int = None) -> int:
     async with db.transaction() as conn:

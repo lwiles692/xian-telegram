@@ -59,3 +59,7 @@ MENTOR_TITLE_THRESHOLDS = (
     (3, "桃李盈门"),
     (5, "一代宗师"),
 )
+
+# T3.6：师父周活跃回报；按徒弟本周活跃日计，小额并入溢出道行周上限。
+MENTOR_WEEKLY_DAOHANG_PER_ACTIVE_DAY = 5
+MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE = 30

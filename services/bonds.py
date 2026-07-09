@@ -22,6 +22,10 @@ def _active_day(now: int) -> str:
     return time.strftime("%Y-%m-%d", time.gmtime(int(now) + ACTIVE_DAY_TZ_OFFSET_SECONDS))
 
 
+def _week(now: int) -> str:
+    return time.strftime("%Y-%W", time.localtime(int(now)))
+
+
 async def expire_pending(now: int = None) -> dict:
     """把 48 小时未确认的关系请求置为 expired；declined/expired 不触发冷却。"""
     now = _now(now)
@@ -212,14 +216,33 @@ async def record_disciple_activity(conn, user_id: int, now: int = None) -> dict:
     """记录徒弟当日首个前台行为；同日去重，解除后冻结（spec-v3 §8.2）。"""
     now = _now(now)
     day = _active_day(now)
+    week = _week(now)
     cur = await conn.execute(
-        "UPDATE social_bonds SET active_days=active_days+1, last_active_day=?, updated_at=? "
-        "WHERE kind=? AND b_id=? AND status=? "
-        "AND (last_active_day IS NULL OR last_active_day<>?)",
-        (day, now, CFG.KIND_MENTOR, user_id, CFG.STATUS_ACTIVE, day))
-    changed = cur.rowcount
+        "SELECT id, a_id, b_id, last_active_day FROM social_bonds "
+        "WHERE kind=? AND b_id=? AND status=? LIMIT 1",
+        (CFG.KIND_MENTOR, user_id, CFG.STATUS_ACTIVE))
+    bond = await cur.fetchone()
     await cur.close()
-    return {"status": "ok", "recorded": bool(changed), "active_day": day}
+    if not bond:
+        return {"status": "ok", "recorded": False, "active_day": day}
+
+    cur = await conn.execute(
+        "INSERT OR IGNORE INTO bond_activity_days("
+        "bond_kind, a_id, b_id, active_day, week, recorded_at"
+        ") VALUES(?,?,?,?,?,?)",
+        (CFG.KIND_MENTOR, bond["a_id"], bond["b_id"], day, week, now))
+    inserted = bool(cur.rowcount)
+    await cur.close()
+    recorded = False
+    if inserted and bond["last_active_day"] != day:
+        cur = await conn.execute(
+            "UPDATE social_bonds SET active_days=active_days+1, last_active_day=?, updated_at=? "
+            "WHERE id=? AND status=? AND (last_active_day IS NULL OR last_active_day<>?)",
+            (day, now, bond["id"], CFG.STATUS_ACTIVE, day))
+        recorded = bool(cur.rowcount)
+        await cur.close()
+    return {"status": "ok", "recorded": recorded, "active_day": day,
+            "bond_id": bond["id"], "mentor_id": bond["a_id"], "disciple_id": bond["b_id"]}
 
 
 async def disciple_activity_today(conn, user_id: int, now: int = None) -> dict:
@@ -295,6 +318,54 @@ async def grant_daily_mentor_transfer(mentor_id: int, disciple_id: int,
             conn, disciple_id, cultivation=amount)
     return {"status": "ok", "mentor_id": mentor_id, "disciple_id": disciple_id,
             "bond_id": bond["id"], "active_day": day, "cultivation": amount}
+
+
+async def settle_weekly_mentor_activity(now: int = None) -> dict:
+    """T3.6 师父周活跃回报：按 active 徒弟本周活跃日发道行，按周幂等。"""
+    now = _now(now)
+    week = _week(now)
+    from services import character as character_service
+
+    rewards = []
+    async with db.transaction() as conn:
+        cur = await conn.execute(
+            "SELECT b.id, b.a_id, b.b_id, COUNT(d.active_day) AS week_active_days "
+            "FROM social_bonds b "
+            "JOIN bond_activity_days d "
+            "ON d.bond_kind=b.kind AND d.a_id=b.a_id AND d.b_id=b.b_id AND d.week=? "
+            "LEFT JOIN bond_weekly_rewards r "
+            "ON r.bond_kind=b.kind AND r.a_id=b.a_id AND r.b_id=b.b_id AND r.week=? "
+            "WHERE b.kind=? AND b.status=? AND r.week IS NULL "
+            "GROUP BY b.id, b.a_id, b.b_id "
+            "HAVING COUNT(d.active_day)>0 "
+            "ORDER BY b.a_id, b.b_id",
+            (week, week, CFG.KIND_MENTOR, CFG.STATUS_ACTIVE))
+        rows = await cur.fetchall()
+        await cur.close()
+        for row in rows:
+            active_days = int(row["week_active_days"] or 0)
+            raw_daohang = min(
+                active_days * CFG.MENTOR_WEEKLY_DAOHANG_PER_ACTIVE_DAY,
+                CFG.MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE,
+            )
+            daohang = await character_service.grant_overflow_capped_daohang_conn(
+                conn, row["a_id"], raw_daohang, "mentor_weekly_activity", now)
+            await conn.execute(
+                "INSERT INTO bond_weekly_rewards("
+                "bond_kind, a_id, b_id, week, active_days, raw_daohang, daohang, settled_at"
+                ") VALUES(?,?,?,?,?,?,?,?)",
+                (CFG.KIND_MENTOR, row["a_id"], row["b_id"], week, active_days,
+                 raw_daohang, daohang, now))
+            rewards.append({
+                "bond_id": row["id"],
+                "mentor_id": row["a_id"],
+                "disciple_id": row["b_id"],
+                "week": week,
+                "active_days": active_days,
+                "raw_daohang": raw_daohang,
+                "daohang": daohang,
+            })
+    return {"status": "ok", "week": week, "settled": len(rewards), "rewards": rewards}
 
 
 async def handle_disciple_breakthrough_conn(conn, disciple_id: int, target_realm: int,

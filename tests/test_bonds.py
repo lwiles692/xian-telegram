@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import inspect
 import sqlite3
 import time
@@ -132,6 +133,20 @@ async def _记住群(user_id: int, chat_id: int, now: int):
         (chat_id, user_id, now, now))
 
 
+def _时刻(year: int, month: int, day: int, hour: int = 4) -> int:
+    return int(datetime(year, month, day, hour, tzinfo=timezone.utc).timestamp())
+
+
+async def _记活跃若干日(user_id: int, start_at: int, days: int):
+    from services import bonds
+
+    for offset in range(days):
+        async with db.transaction() as conn:
+            recorded = await bonds.record_disciple_activity(
+                conn, user_id, now=start_at + offset * 24 * 3600)
+        assert recorded["recorded"] is True
+
+
 @pytest.mark.asyncio
 async def test_羁绊_schema_重复开库仍成阵(tmp_path):
     path = str(tmp_path / "bonds-schema.db")
@@ -141,8 +156,11 @@ async def test_羁绊_schema_重复开库仍成阵(tmp_path):
         bond_cols = await _列字典("social_bonds")
         milestone_cols = await _列字典("bond_milestones")
         transfer_cols = await _列字典("bond_daily_transfers")
+        activity_cols = await _列字典("bond_activity_days")
+        reward_cols = await _列字典("bond_weekly_rewards")
         title_cols = await _列字典("bond_titles")
         indexes = await _索引字典("social_bonds")
+        activity_indexes = await _索引字典("bond_activity_days")
         pending_cols = await _索引列("idx_bonds_pending_expire")
         mentor_cols = await _索引列("idx_bonds_mentor_b")
         partner_cols = await _索引列("idx_bonds_partner_a")
@@ -158,10 +176,18 @@ async def test_羁绊_schema_重复开库仍成阵(tmp_path):
     assert set(transfer_cols) >= {
         "bond_kind", "a_id", "b_id", "active_day", "cultivation", "granted_at",
     }
+    assert set(activity_cols) >= {
+        "bond_kind", "a_id", "b_id", "active_day", "week", "recorded_at",
+    }
+    assert set(reward_cols) >= {
+        "bond_kind", "a_id", "b_id", "week", "active_days", "raw_daohang",
+        "daohang", "settled_at",
+    }
     assert set(title_cols) >= {"user_id", "title_key", "title", "threshold", "unlocked_at"}
 
     assert {"idx_bonds_mentor_b", "idx_bonds_partner_a", "idx_bonds_pending_expire",
             "idx_bonds_a", "idx_bonds_b"} <= set(indexes)
+    assert "idx_bond_activity_week" in activity_indexes
     assert indexes["idx_bonds_mentor_b"]["unique"] == 1
     assert indexes["idx_bonds_partner_a"]["unique"] == 1
     assert mentor_cols == ["b_id"]
@@ -174,6 +200,19 @@ async def test_羁绊_schema_重复开库仍成阵(tmp_path):
         if row["pk"]
     ]
     assert pk_cols == ["bond_kind", "a_id", "b_id", "milestone"]
+
+    activity_pk = [
+        row["name"]
+        for row in sorted(activity_cols.values(), key=lambda item: item["pk"])
+        if row["pk"]
+    ]
+    reward_pk = [
+        row["name"]
+        for row in sorted(reward_cols.values(), key=lambda item: item["pk"])
+        if row["pk"]
+    ]
+    assert activity_pk == ["bond_kind", "a_id", "b_id", "active_day"]
+    assert reward_pk == ["bond_kind", "a_id", "b_id", "week"]
 
 
 def test_羁绊常量_四十八时辰与七日法度():
@@ -192,6 +231,9 @@ def test_羁绊常量_四十八时辰与七日法度():
     assert BONDS.GRADUATION_MENTOR_DAOHANG > 0
     assert BONDS.GRADUATION_DISCIPLE_DAOHANG > 0
     assert [item[0] for item in BONDS.MENTOR_TITLE_THRESHOLDS] == [1, 3, 5]
+    assert BONDS.MENTOR_WEEKLY_DAOHANG_PER_ACTIVE_DAY == 5
+    assert BONDS.MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE == 30
+    assert BONDS.MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE < settle.OVERFLOW_DAOHANG_WEEKLY_CAP
     for realm, amount in BONDS.MENTOR_TRANSFER_CULTIVATION_BY_REALM.items():
         one_hour = settle.seclusion_gain(realm, 0, 0, 3600, root_bone=0)
         assert amount < one_hour * 0.5
@@ -866,6 +908,169 @@ async def test_桃李称号_累计出师一三五名递进解锁(temp_db):
     assert len(graduate_rows) == 5
 
 
+@pytest.mark.asyncio
+async def test_周活跃回报_按活跃日计且重复结算幂等(temp_db):
+    from config import bonds as BONDS
+    from services import bonds
+
+    start = _时刻(2026, 7, 6)
+    settle_at = _时刻(2026, 7, 12, hour=15)
+    mentor_id, disciple_id = 3501, 3601
+    await _激活师徒(mentor_id, disciple_id, start - 100)
+    await _记活跃若干日(disciple_id, start, 3)
+    before = await character.get(mentor_id)
+
+    first = await bonds.settle_weekly_mentor_activity(now=settle_at)
+    after_first = await character.get(mentor_id)
+    duplicate = await bonds.settle_weekly_mentor_activity(now=settle_at)
+    after_duplicate = await character.get(mentor_id)
+    reward = await db.fetchone(
+        "SELECT * FROM bond_weekly_rewards WHERE a_id=? AND b_id=?",
+        (mentor_id, disciple_id))
+    weekly = await db.fetchone(
+        "SELECT overflow_daohang FROM weekly_activity WHERE user_id=? AND week=?",
+        (mentor_id, first["week"]))
+    events = await db.fetchall(
+        "SELECT event_type, amount FROM path_events WHERE user_id=?",
+        (mentor_id,))
+
+    expected = 3 * BONDS.MENTOR_WEEKLY_DAOHANG_PER_ACTIVE_DAY
+    assert first["status"] == "ok"
+    assert first["settled"] == 1
+    assert first["rewards"][0]["active_days"] == 3
+    assert first["rewards"][0]["raw_daohang"] == expected
+    assert first["rewards"][0]["daohang"] == expected
+    assert after_first.daohang == before.daohang + expected
+    assert duplicate["settled"] == 0
+    assert after_duplicate.daohang == after_first.daohang
+    assert reward["active_days"] == 3
+    assert reward["raw_daohang"] == expected
+    assert reward["daohang"] == expected
+    assert weekly["overflow_daohang"] == expected
+    assert [(row["event_type"], row["amount"]) for row in events] == [
+        ("mentor_weekly_activity", expected)]
+
+
+@pytest.mark.asyncio
+async def test_周活跃回报_满勤徒弟按单徒上限封顶(temp_db):
+    from config import bonds as BONDS
+    from services import bonds
+
+    start = _时刻(2026, 7, 6)
+    settle_at = _时刻(2026, 7, 12, hour=15)
+    mentor_id, disciple_id = 3701, 3801
+    await _激活师徒(mentor_id, disciple_id, start - 100)
+    await _记活跃若干日(disciple_id, start, 7)
+    before = await character.get(mentor_id)
+
+    settled = await bonds.settle_weekly_mentor_activity(now=settle_at)
+    after = await character.get(mentor_id)
+    reward = await db.fetchone(
+        "SELECT active_days, raw_daohang, daohang FROM bond_weekly_rewards "
+        "WHERE a_id=? AND b_id=?",
+        (mentor_id, disciple_id))
+
+    assert settled["settled"] == 1
+    assert settled["rewards"][0]["active_days"] == 7
+    assert reward["active_days"] == 7
+    assert reward["raw_daohang"] == BONDS.MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE
+    assert reward["daohang"] == BONDS.MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE
+    assert after.daohang == before.daohang + BONDS.MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE
+
+
+@pytest.mark.asyncio
+async def test_周活跃回报_计入溢出道行周上限(temp_db):
+    from config import bonds as BONDS
+    from services import bonds
+
+    start = _时刻(2026, 7, 6)
+    settle_at = _时刻(2026, 7, 12, hour=15)
+    mentor_id, disciple_id = 3901, 4001
+    await _激活师徒(mentor_id, disciple_id, start - 100)
+    await _记活跃若干日(disciple_id, start, 7)
+    week = time.strftime("%Y-%W", time.localtime(settle_at))
+    used = settle.OVERFLOW_DAOHANG_WEEKLY_CAP - 10
+    await db.execute(
+        "INSERT INTO weekly_activity(user_id, week, overflow_daohang) VALUES(?,?,?)",
+        (mentor_id, week, used))
+    before = await character.get(mentor_id)
+
+    settled = await bonds.settle_weekly_mentor_activity(now=settle_at)
+    after = await character.get(mentor_id)
+    weekly = await db.fetchone(
+        "SELECT overflow_daohang FROM weekly_activity WHERE user_id=? AND week=?",
+        (mentor_id, week))
+    reward = await db.fetchone(
+        "SELECT raw_daohang, daohang FROM bond_weekly_rewards WHERE a_id=? AND b_id=?",
+        (mentor_id, disciple_id))
+
+    assert settled["rewards"][0]["raw_daohang"] == BONDS.MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE
+    assert settled["rewards"][0]["daohang"] == 10
+    assert after.daohang == before.daohang + 10
+    assert weekly["overflow_daohang"] == settle.OVERFLOW_DAOHANG_WEEKLY_CAP
+    assert reward["raw_daohang"] == BONDS.MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE
+    assert reward["daohang"] == 10
+
+
+@pytest.mark.asyncio
+async def test_周活跃回报_出师后停发(temp_db):
+    from config import bonds as BONDS
+    from services import bonds
+
+    start = _时刻(2026, 7, 6)
+    settle_at = _时刻(2026, 7, 12, hour=15)
+    mentor_id, disciple_id = 4101, 4201
+    bond_id = await _激活师徒(mentor_id, disciple_id, start - 100)
+    await _记活跃若干日(disciple_id, start, 7)
+    await character.set_progress(disciple_id, 3, 0, 0)
+    await db.execute(
+        "UPDATE social_bonds SET active_days=? WHERE id=?",
+        (BONDS.GRADUATION_ACTIVE_DAYS_REQUIRED, bond_id))
+    graduated = await bonds.graduate_mentor_bond(
+        bond_id, user_id=mentor_id, now=start + 7 * 24 * 3600)
+    before = await character.get(mentor_id)
+
+    settled = await bonds.settle_weekly_mentor_activity(now=settle_at)
+    after = await character.get(mentor_id)
+    rewards = await db.fetchall(
+        "SELECT * FROM bond_weekly_rewards WHERE a_id=? AND b_id=?",
+        (mentor_id, disciple_id))
+
+    assert graduated["status"] == "ok"
+    assert settled["settled"] == 0
+    assert after.daohang == before.daohang
+    assert rewards == []
+
+
+@pytest.mark.asyncio
+async def test_周活跃回报_三名满勤徒弟仍远低于周上限(temp_db):
+    from config import bonds as BONDS
+    from services import bonds
+
+    start = _时刻(2026, 7, 6)
+    settle_at = _时刻(2026, 7, 12, hour=15)
+    mentor_id = 4301
+    disciple_ids = [4401, 4402, 4403]
+    for disciple_id in disciple_ids:
+        await _激活师徒(mentor_id, disciple_id, start - 100 + disciple_id)
+        await _记活跃若干日(disciple_id, start, 7)
+    before = await character.get(mentor_id)
+
+    settled = await bonds.settle_weekly_mentor_activity(now=settle_at)
+    after = await character.get(mentor_id)
+    weekly = await db.fetchone(
+        "SELECT overflow_daohang FROM weekly_activity WHERE user_id=? AND week=?",
+        (mentor_id, settled["week"]))
+
+    expected = len(disciple_ids) * BONDS.MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE
+    assert settled["settled"] == len(disciple_ids)
+    assert sum(row["daohang"] for row in settled["rewards"]) == expected
+    assert after.daohang == before.daohang + expected
+    assert weekly["overflow_daohang"] == expected
+    assert expected == 90
+    assert expected < settle.OVERFLOW_DAOHANG_WEEKLY_CAP
+
+
 def test_羁绊过期任务_已挂入调度器():
     from bot import app as bot_app
 
@@ -873,3 +1078,13 @@ def test_羁绊过期任务_已挂入调度器():
 
     assert "bonds_service.expire_pending" in source
     assert '"interval", hours=1' in source
+
+
+def test_师父周活跃回报_已挂入周日错峰调度器():
+    from bot import app as bot_app
+
+    source = inspect.getsource(bot_app.main)
+
+    assert "bonds_service.settle_weekly_mentor_activity" in source
+    assert 'day_of_week="sun"' in source
+    assert "minute=40" in source

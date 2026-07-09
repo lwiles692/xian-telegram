@@ -335,6 +335,28 @@ CREATE TABLE IF NOT EXISTS bond_daily_transfers (
     granted_at  INTEGER NOT NULL,
     PRIMARY KEY (bond_kind, a_id, b_id, active_day)
 );
+CREATE TABLE IF NOT EXISTS bond_activity_days (
+    bond_kind   TEXT NOT NULL,
+    a_id        INTEGER NOT NULL,
+    b_id        INTEGER NOT NULL,
+    active_day  TEXT NOT NULL,
+    week        TEXT NOT NULL,
+    recorded_at INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, a_id, b_id, active_day)
+);
+CREATE INDEX IF NOT EXISTS idx_bond_activity_week
+ON bond_activity_days(bond_kind, week, a_id);
+CREATE TABLE IF NOT EXISTS bond_weekly_rewards (
+    bond_kind   TEXT NOT NULL,
+    a_id        INTEGER NOT NULL,
+    b_id        INTEGER NOT NULL,
+    week        TEXT NOT NULL,
+    active_days INTEGER NOT NULL DEFAULT 0,
+    raw_daohang INTEGER NOT NULL DEFAULT 0,
+    daohang     INTEGER NOT NULL DEFAULT 0,
+    settled_at  INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, a_id, b_id, week)
+);
 CREATE TABLE IF NOT EXISTS bond_titles (
     user_id     INTEGER NOT NULL,
     title_key   TEXT NOT NULL,
