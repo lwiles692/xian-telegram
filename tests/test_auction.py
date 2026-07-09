@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import sqlite3
 
 import pytest
 import pytest_asyncio
@@ -76,7 +77,7 @@ async def test_auction_schema_and_instance_status_migration_are_idempotent(tmp_p
     assert {row["name"] for row in auction_cols} >= {
         "id", "seller_id", "kind", "item_key", "instance_id", "qty",
         "start_price", "buyout", "current_bid", "current_bidder",
-        "end_at", "extend_count", "created_at", "status",
+        "end_at", "extend_count", "created_at", "settled_at", "status",
     }
     assert {row["name"] for row in bid_cols} == {"id", "auction_id", "bidder_id", "amount", "bid_at"}
     assert {row["name"] for row in escrow_cols} == {"auction_id", "bidder_id", "amount"}
@@ -87,8 +88,36 @@ async def test_auction_schema_and_instance_status_migration_are_idempotent(tmp_p
     }
     assert "status" in {row["name"] for row in inst_cols}
     assert {"idx_auctions_status_end", "idx_auctions_status_created",
-            "idx_auctions_seller"} <= {row["name"] for row in indexes}
+            "idx_auctions_audit_sold", "idx_auctions_seller"} <= {row["name"] for row in indexes}
     assert "idx_auction_bids_auction" in {row["name"] for row in bid_indexes}
+
+
+@pytest.mark.asyncio
+async def test_auction_added_columns_migrate_before_dependent_indexes(tmp_path):
+    path = tmp_path / "old-auction.db"
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "CREATE TABLE auctions ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL, "
+            "kind TEXT NOT NULL, item_key TEXT, instance_id INTEGER, qty INTEGER, "
+            "start_price INTEGER NOT NULL, buyout INTEGER, current_bid INTEGER, "
+            "current_bidder INTEGER, end_at INTEGER NOT NULL, "
+            "extend_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    await db.init_db(str(path))
+    try:
+        cols = await db.fetchall("PRAGMA table_info(auctions)")
+        indexes = await db.fetchall("PRAGMA index_list(auctions)")
+    finally:
+        await db.close_db()
+
+    assert {"created_at", "settled_at"} <= {row["name"] for row in cols}
+    assert {"idx_auctions_status_created",
+            "idx_auctions_audit_sold"} <= {row["name"] for row in indexes}
 
 
 @pytest.mark.asyncio
@@ -116,6 +145,8 @@ def test_auction_config_matches_m2_initial_rules():
     assert AUCTION.CLOSING_NOTICE_WINDOW_SECONDS == 3600
     assert AUCTION.AUCTION_BROADCAST_LIMIT >= 1
     assert AUCTION.WATCHER_NOTIFY_LIMIT >= 1
+    assert AUCTION.AUDIT_FREQUENT_WINDOW_SECONDS == 24 * 3600
+    assert AUCTION.AUDIT_FREQUENT_MIN_TRADES == 3
     assert AUCTION.min_buyout_price(100) == 120
     assert AUCTION.listing_fee(1) == 1
     assert AUCTION.min_next_bid(100) == 105
@@ -157,6 +188,7 @@ async def test_equipment_auction_locks_instance_and_charges_fee(temp_db):
     assert row["status"] == AUCTION.STATUS_ACTIVE
     assert row["end_at"] == res["end_at"]
     assert row["created_at"] == 1000
+    assert row["settled_at"] == 0
 
     inst = await db.fetchone("SELECT status FROM item_instances WHERE id=?", (inst_id,))
     assert inst["status"] == AUCTION.INSTANCE_STATUS_AUCTION
@@ -740,6 +772,98 @@ async def test_settle_due_scans_only_due_active_auctions(temp_db):
     assert (await auction.get_auction(future["auction_id"]))["status"] == AUCTION.STATUS_ACTIVE
     assert await character.item_qty(due_seller, "天外残玉", bound=0) == 1
     assert await character.item_qty(future_seller, "天外残玉", bound=0) == 0
+
+
+@pytest.mark.asyncio
+async def test_high_price_sale_queues_group_broadcast_and_audit_hit(temp_db):
+    seller, buyer = 7264, 7265
+    chat_id = -726501
+    await db.execute(
+        "INSERT INTO bot_chat_members(chat_id, user_id, last_seen_at) VALUES(?,?,?)",
+        (chat_id, buyer, 900))
+    await character.create(seller, "天价拍主")
+    await character.create(buyer, "天价买主")
+    await character.add_stone(seller, 50_000)
+    await character.add_stone(buyer, 2_000_000)
+    await character.add_item(seller, "混沌残核", 1, bound=0)
+    listed = await auction.create_material_auction(
+        seller, "混沌残核", 1, AUCTION.HIGH_PRICE_BROADCAST_THRESHOLD,
+        buyout=AUCTION.min_buyout_price(AUCTION.HIGH_PRICE_BROADCAST_THRESHOLD),
+        now=1000)
+
+    res = await auction.bid(
+        buyer, listed["auction_id"], listed["buyout"], now=1001)
+    row = await auction.get_auction(listed["auction_id"])
+    broadcasts = await db.fetchall(
+        "SELECT * FROM social_broadcasts WHERE event_type=?",
+        ("auction.high_price_sale",))
+    audit_rows = await auction.audit_suspicious(
+        limit_price=AUCTION.HIGH_PRICE_BROADCAST_THRESHOLD)
+
+    assert res["status"] == "ok"
+    assert row["settled_at"] == 1001
+    assert len(broadcasts) == 1
+    assert broadcasts[0]["chat_id"] == chat_id
+    assert "落槌价" in broadcasts[0]["text"]
+    assert "混沌残核" in broadcasts[0]["text"]
+    assert audit_rows[0]["auction_id"] == listed["auction_id"]
+    assert audit_rows[0]["source"] == "sold"
+    assert audit_rows[0]["price"] == listed["buyout"]
+
+
+@pytest.mark.asyncio
+async def test_auction_audit_flags_active_high_price_and_frequent_trades(temp_db):
+    high_seller = 7266
+    seller, buyer = 7267, 7268
+    await character.create(high_seller, "高价在拍主")
+    await character.add_stone(high_seller, 50_000)
+    await character.add_item(high_seller, "天外残玉", 1, bound=0)
+    active = await auction.create_material_auction(
+        high_seller, "天外残玉", 1, AUCTION.HIGH_PRICE_BROADCAST_THRESHOLD,
+        now=1000)
+
+    await character.create(seller, "互拍主")
+    await character.create(buyer, "互拍客")
+    await character.add_stone(seller, 1000)
+    await character.add_stone(buyer, 5000)
+    await character.add_item(seller, "星陨砂", 3, bound=0)
+    for idx in range(AUCTION.AUDIT_FREQUENT_MIN_TRADES):
+        listed = await auction.create_material_auction(
+            seller, "星陨砂", 1, 200 + idx, buyout=300 + idx, now=1100 + idx)
+        assert (await auction.bid(buyer, listed["auction_id"], 300 + idx,
+                                  now=1200 + idx))["status"] == "ok"
+
+    high_rows = await auction.audit_suspicious(
+        limit_price=AUCTION.HIGH_PRICE_BROADCAST_THRESHOLD)
+    frequent = await auction.audit_frequent_trades(
+        now=2000, window_seconds=2000, min_trades=AUCTION.AUDIT_FREQUENT_MIN_TRADES)
+    report = await auction.audit_report(
+        limit_price=AUCTION.HIGH_PRICE_BROADCAST_THRESHOLD,
+        now=2000, window_seconds=2000, min_trades=AUCTION.AUDIT_FREQUENT_MIN_TRADES)
+
+    active_hits = [row for row in high_rows if row["auction_id"] == active["auction_id"]]
+    assert active_hits
+    assert active_hits[0]["source"] == "active"
+    assert active_hits[0]["price_kind"] == "start_price"
+    assert frequent
+    assert frequent[0]["seller_id"] == seller
+    assert frequent[0]["buyer_id"] == buyer
+    assert frequent[0]["trades"] == AUCTION.AUDIT_FREQUENT_MIN_TRADES
+    assert frequent[0]["first_at"] == 1200
+    assert report["high_price"]
+    assert report["frequent_trades"]
+
+
+def test_auction_audit_db_arg_requires_existing_file(tmp_path, monkeypatch):
+    from tools.auction_audit import resolve_db_arg
+
+    monkeypatch.chdir(tmp_path)
+    db_file = tmp_path / "auction.db"
+    db_file.write_text("")
+
+    assert resolve_db_arg("auction.db") == str(db_file)
+    with pytest.raises(SystemExit):
+        resolve_db_arg("missing.db")
 
 
 @pytest.mark.asyncio

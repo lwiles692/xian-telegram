@@ -140,6 +140,12 @@ def _group_text(event_type: str, payload: dict) -> str:
         title = payload.get("title") or ""
         tail = f"，尊号「{title}」传开" if title else ""
         return f"🌌 {name} 飞升精进，「{passive}」圆满{tail}。"
+    if event_type == "auction.high_price_sale":
+        item = payload.get("item", "拍品")
+        qty = payload.get("qty") or 1
+        return (
+            f"🔨 {name} 于拍卖行拍下「{item}」×{qty}，"
+            f"落槌价 {payload.get('price')} 灵石，满堂皆惊。")
     return ""
 
 

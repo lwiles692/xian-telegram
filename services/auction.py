@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """英式拍卖行服务：挂拍、托管与撤拍（spec-v3 §6 / M2）。"""
 
-import time
 import logging
+import time
 
 from config import auction as CFG
 from config.items import ITEMS, equipment_slot, is_tradable, item_name
@@ -267,8 +267,8 @@ async def cancel(seller_id: int, auction_id: int, now: int = None) -> dict:
         if auction["current_bidder"] is not None or auction["current_bid"] is not None:
             return {"status": "has_bid"}
         cur = await conn.execute(
-            "UPDATE auctions SET status=? WHERE id=? AND status=?",
-            (CFG.STATUS_CANCELLED, auction_id, CFG.STATUS_ACTIVE))
+            "UPDATE auctions SET status=?, settled_at=? WHERE id=? AND status=?",
+            (CFG.STATUS_CANCELLED, int(now), auction_id, CFG.STATUS_ACTIVE))
         changed = cur.rowcount
         await cur.close()
         if not changed:
@@ -542,6 +542,55 @@ async def notify_closing_watchers(now: int = None) -> dict:
     return {"status": "ok", "queued": queued}
 
 
+async def audit_suspicious(limit_price: int = CFG.HIGH_PRICE_BROADCAST_THRESHOLD) -> list[dict]:
+    """高价可疑记录：在拍高价与已成交天价都进入审计视野。"""
+    limit_price = int(limit_price)
+    active_rows = await db.fetchall(
+        "SELECT * FROM auctions "
+        "WHERE status=? AND (start_price>=? OR buyout>=? OR current_bid>=?)",
+        (CFG.STATUS_ACTIVE, limit_price, limit_price, limit_price))
+    sold_rows = await db.fetchall(
+        "SELECT * FROM auctions WHERE status=? AND current_bid>=?",
+        (CFG.STATUS_SOLD, limit_price))
+    results = []
+    for row in active_rows:
+        results.append(_format_audit_auction(row, "active", limit_price))
+    for row in sold_rows:
+        results.append(_format_audit_auction(row, "sold", limit_price))
+    results.sort(key=lambda r: (r["price"], r["auction_id"]), reverse=True)
+    return results
+
+
+async def audit_frequent_trades(now: int = None,
+                                window_seconds: int = CFG.AUDIT_FREQUENT_WINDOW_SECONDS,
+                                min_trades: int = CFG.AUDIT_FREQUENT_MIN_TRADES) -> list[dict]:
+    """高频对倒：同一卖家/买家对子在窗口内多次成交。"""
+    now = _now(now)
+    since = now - int(window_seconds)
+    rows = await db.fetchall(
+        "SELECT seller_id, current_bidder AS buyer_id, COUNT(*) AS trades, "
+        "SUM(current_bid) AS total_price, MIN(settled_at) AS first_at, "
+        "MAX(settled_at) AS last_at "
+        "FROM auctions "
+        "WHERE status=? AND current_bidder IS NOT NULL AND settled_at>? AND settled_at<=? "
+        "GROUP BY seller_id, current_bidder HAVING trades>=? "
+        "ORDER BY trades DESC, total_price DESC",
+        (CFG.STATUS_SOLD, since, now, int(min_trades)))
+    return [dict(row) for row in rows]
+
+
+async def audit_report(limit_price: int = CFG.HIGH_PRICE_BROADCAST_THRESHOLD,
+                       now: int = None,
+                       window_seconds: int = CFG.AUDIT_FREQUENT_WINDOW_SECONDS,
+                       min_trades: int = CFG.AUDIT_FREQUENT_MIN_TRADES) -> dict:
+    """拍卖行审计总览，供离线工具和上线巡检读取。"""
+    return {
+        "high_price": await audit_suspicious(limit_price),
+        "frequent_trades": await audit_frequent_trades(
+            now=now, window_seconds=window_seconds, min_trades=min_trades),
+    }
+
+
 def _min_bid(auction) -> int:
     if auction["current_bid"] is None:
         return int(auction["start_price"])
@@ -565,9 +614,9 @@ async def _complete_sale(conn, auction, buyer_id: int, price: int, now: int,
         if escrow < price:
             return {"status": "bad_escrow", "need": price, "have": escrow}
     cur = await conn.execute(
-        "UPDATE auctions SET current_bid=?, current_bidder=?, status=? "
+        "UPDATE auctions SET current_bid=?, current_bidder=?, status=?, settled_at=? "
         "WHERE id=? AND status=?",
-        (int(price), buyer_id, CFG.STATUS_SOLD, auction["id"], CFG.STATUS_ACTIVE))
+        (int(price), buyer_id, CFG.STATUS_SOLD, int(now), auction["id"], CFG.STATUS_ACTIVE))
     changed = cur.rowcount
     await cur.close()
     if not changed:
@@ -585,6 +634,13 @@ async def _complete_sale(conn, auction, buyer_id: int, price: int, now: int,
         {"auction_id": auction["id"], "seller_id": auction["seller_id"],
          "item": item_name(auction["item_key"]), "price": int(price), "tax": tax},
         now)
+    if int(price) >= CFG.HIGH_PRICE_BROADCAST_THRESHOLD:
+        await game_events.emit_conn(
+            conn, buyer_id, "auction.high_price_sale",
+            {"auction_id": auction["id"], "seller_id": auction["seller_id"],
+             "item": item_name(auction["item_key"]), "qty": auction["qty"],
+             "price": int(price)},
+            now)
     return {"status": "ok", "sold": True, "auction_id": auction["id"],
             "kind": auction["kind"], "item": item_name(auction["item_key"]),
             "qty": auction["qty"], "price": int(price), "tax": tax,
@@ -683,8 +739,8 @@ async def settle(auction_id: int, now: int = None) -> dict:
 
         if auction["current_bidder"] is None or auction["current_bid"] is None:
             cur = await conn.execute(
-                "UPDATE auctions SET status=? WHERE id=? AND status=?",
-                (CFG.STATUS_PASSED, auction_id, CFG.STATUS_ACTIVE))
+                "UPDATE auctions SET status=?, settled_at=? WHERE id=? AND status=?",
+                (CFG.STATUS_PASSED, int(now), auction_id, CFG.STATUS_ACTIVE))
             changed = cur.rowcount
             await cur.close()
             if not changed:
@@ -736,5 +792,34 @@ def _format_auction(row) -> dict:
         "end_at": row["end_at"],
         "extend_count": row["extend_count"],
         "created_at": row["created_at"],
+        "settled_at": row["settled_at"],
         "status": row["status"],
+    }
+
+
+def _format_audit_auction(row, source: str, limit_price: int) -> dict:
+    prices = {
+        "start_price": int(row["start_price"] or 0),
+        "buyout": int(row["buyout"] or 0),
+        "current_bid": int(row["current_bid"] or 0),
+    }
+    price_kind, price = max(prices.items(), key=lambda item: item[1])
+    if source == "sold":
+        price_kind = "current_bid"
+        price = int(row["current_bid"] or 0)
+    return {
+        "auction_id": row["id"],
+        "source": source,
+        "price_kind": price_kind,
+        "price": price,
+        "threshold": int(limit_price),
+        "seller_id": row["seller_id"],
+        "buyer_id": row["current_bidder"],
+        "kind": row["kind"],
+        "item_key": row["item_key"],
+        "item": item_name(row["item_key"]),
+        "qty": row["qty"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "settled_at": row["settled_at"],
     }

@@ -12,6 +12,7 @@ DAILY_LIMITS = {
     "sect.upgrade": 2,
     "ascension.trial": 2,
     "ascension.upgrade": 2,
+    "auction.high_price_sale": 2,
 }
 
 MAX_ATTEMPTS = 5

@@ -382,6 +382,7 @@ CREATE TABLE IF NOT EXISTS auctions (
     end_at         INTEGER NOT NULL,
     extend_count   INTEGER NOT NULL DEFAULT 0,
     created_at     INTEGER NOT NULL DEFAULT 0,
+    settled_at     INTEGER NOT NULL DEFAULT 0,
     status         TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS auction_bids (
@@ -421,8 +422,6 @@ CREATE INDEX IF NOT EXISTS idx_market_trades_audit
 ON market_trades(created_at, seller_id, buyer_id);
 CREATE INDEX IF NOT EXISTS idx_auctions_status_end
 ON auctions(status, end_at);
-CREATE INDEX IF NOT EXISTS idx_auctions_status_created
-ON auctions(status, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_auctions_seller
 ON auctions(seller_id, status);
 CREATE INDEX IF NOT EXISTS idx_auction_bids_auction
@@ -479,6 +478,14 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "item_instances", "enhance_level", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "item_instances", "status", "TEXT NOT NULL DEFAULT 'normal'")
     await _ensure_column(_conn, "auctions", "created_at", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "auctions", "settled_at", "INTEGER NOT NULL DEFAULT 0")
+    # 拍卖新增列先迁移再建索引，兼容旧库从 T2.6/T2.7 直接升级。
+    await _conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_auctions_status_created "
+        "ON auctions(status, created_at, id)")
+    await _conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_auctions_audit_sold "
+        "ON auctions(status, settled_at, seller_id, current_bidder)")
     await _ensure_column(_conn, "sect_members", "donate_day", "TEXT")
     await _ensure_column(_conn, "sect_members", "donate_today", "INTEGER NOT NULL DEFAULT 0")
     # 迁移时留空(NULL)而非填默认值，使部署前的在途历练落入 _resolve 的"旧 run"兼容分支
