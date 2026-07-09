@@ -41,8 +41,7 @@ HUASHEN_BRANCH_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普�
 LIANXU_HUASHEN_GEARED = HUASHEN_GEARED
 LIANXU_EQUIP_KEYS = ["太初虚刃", "玄冥空甲", "混沌灵佩"]
 LIANXU_EQUIPMENT_PROFILE = {**HUASHEN_GEARED, "equip": LIANXU_EQUIP_KEYS}
-# T1.4 门槛回归重调前，LIANXU_GEARED 仍沿 M0 化神装备近似档。
-LIANXU_GEARED = LIANXU_HUASHEN_GEARED
+LIANXU_GEARED = LIANXU_EQUIPMENT_PROFILE
 # 元婴圆满满 buff 上界档：现役元婴装备 + 可叠满临时/福利 buff（推到 §6.3 合算上限）。
 # 红线护栏（spec §3.2）：即便如此仍不得稳定刷化神中/难 Boss。M0 阶段不含道途。
 YUANYING_FULL_BUFF = {
@@ -274,7 +273,7 @@ def _seclusion_daily_gain(cost: int, root_bone: int, hours_per_day: float, realm
 
 def lianxu_progression_days(root_bone: int, seclusion_hours_per_day: float,
                             daily_stamina: int, stage_maps: tuple[str, str, str],
-                            profile=LIANXU_HUASHEN_GEARED, n: int = 120) -> dict:
+                            profile=LIANXU_GEARED, n: int = 120) -> dict:
     """炼虚初期→圆满的天数估算：三段推进到圆满，闭关 + 每日炼虚图修为。"""
     stages = []
     total = 0.0
@@ -636,6 +635,18 @@ def report() -> None:
     print(f"  经济两档 存量炼虚图最高{stored['max_value']:5.1f}/{stored['value_cap']:5.1f}"
           f" 新进化神路线{new['route_value']:5.1f}/{new['value_cap']:5.1f}"
           f" 日耗精力{new['daily_stamina']}/{new['stamina_cap']}")
+    print("-" * 78)
+    print("M1 炼虚装备档回归(T1.4): LIANXU_GEARED 三图/秘境/Boss")
+    for stage, map_key in ((0, "太初雾泽"), (0, "虚空裂海"), (0, "混沌古狱"),
+                           (1, "虚空裂海"), (2, "混沌古狱")):
+        run = map_run_winrate(5, stage, map_key, profile=LIANXU_GEARED, n=120)
+        boss = winrate(5, stage, MAPS[map_key]["boss"], profile=LIANXU_GEARED, n=120)
+        print(f"  炼虚{stage}阶+炼虚装 {map_key:<5} 连战{run*100:5.1f}% Boss{boss*100:5.1f}%")
+    xukong_entry = dungeon_clear_fraction(5, 0, "xukong", profile=LIANXU_GEARED, n=120)
+    xukong_full = dungeon_clear_fraction(5, R.num_stages(5) - 1, "xukong", profile=LIANXU_GEARED, n=120)
+    lianxu_boss = world_boss_kill_challenges("lianxu", 5, 2, n=120, profile=LIANXU_GEARED)
+    print(f"  虚空神殿 入门{xukong_entry*100:5.1f}% 圆满{xukong_full*100:5.1f}%"
+          f"  吞虚魔蟒≈{lianxu_boss:5.1f}次")
     print("=" * 78)
     print("世界 Boss 单次伤害 & 击杀所需挑战次数(满配)")
     for bkey, cfg in WORLD_BOSSES.items():

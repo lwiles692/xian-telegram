@@ -154,6 +154,7 @@ def test_lianxu_equipment_sources_include_dungeon_boss_and_hard_map():
 
 def test_lianxu_equipment_profile_keeps_anchor_headroom():
     base = R.base_stats(5, R.num_stages(5) - 1)
+    assert B.LIANXU_GEARED == B.LIANXU_EQUIPMENT_PROFILE
     geared = B.build_player_stats(5, R.num_stages(5) - 1, B.LIANXU_EQUIPMENT_PROFILE)
     capped = B.build_player_stats(
         5, R.num_stages(5) - 1,

@@ -350,17 +350,19 @@ def test_lianxu_maps_config_and_duration_ranges():
     assert explore._plan_minutes(MAPS["混沌古狱"], True, 2) == 26
 
 
-def test_lianxu_entry_with_huashen_gear_hits_map_gates():
-    """spec-v3 §3.5：M0 炼虚门槛按炼虚初期 + 化神装备档验收。"""
+def test_lianxu_geared_hits_map_gates():
+    """spec-v3 M1 T1.4：炼虚门槛按炼虚装备档回归验收。"""
     from config.maps import MAPS
 
-    profile = B.LIANXU_HUASHEN_GEARED
+    profile = B.LIANXU_GEARED
     assert B.map_run_winrate(5, 0, "太初雾泽", profile=profile, n=120) >= 0.95
     assert B.map_run_winrate(5, 0, "虚空裂海", profile=profile, n=120) >= 0.65
     assert B.winrate(5, 0, MAPS["虚空裂海"]["boss"], profile=profile, n=120) < 0.05
     assert B.map_run_winrate(5, 0, "混沌古狱", profile=profile, n=120) < 0.05
     assert B.winrate(5, 1, MAPS["虚空裂海"]["boss"], profile=profile, n=120) >= 0.85
+    assert B.winrate(5, 1, MAPS["混沌古狱"]["boss"], profile=profile, n=120) < 0.05
     assert B.winrate(5, 2, MAPS["混沌古狱"]["boss"], profile=profile, n=120) >= 0.85
+    assert B.map_run_winrate(5, R.num_stages(5) - 1, "混沌古狱", profile=profile, n=120) >= 0.95
 
 
 def test_huashen_full_buff_cannot_break_lianxu_boss_gates():
@@ -407,7 +409,7 @@ def test_lianxu_maps_are_better_growth_route_than_huashen_maps():
     from config.maps import MAPS
 
     last = R.num_stages(5) - 1
-    assert B.map_run_winrate(5, last, "天外古墟", profile=B.LIANXU_HUASHEN_GEARED, n=120) >= 0.98
+    assert B.map_run_winrate(5, last, "天外古墟", profile=B.LIANXU_GEARED, n=120) >= 0.98
     best_huashen = max(MAPS[key]["cult"] / MAPS[key]["stamina"] for key in TIERS[4])
     weakest_lianxu = min(MAPS[key]["cult"] / MAPS[key]["stamina"] for key in TIERS[5])
     assert weakest_lianxu > best_huashen
