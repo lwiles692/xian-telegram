@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS item_instances (
     tier           TEXT NOT NULL,
     affixes_json   TEXT NOT NULL DEFAULT '{}',
     enhance_level  INTEGER NOT NULL DEFAULT 0,
-    equipped_slot  TEXT
+    equipped_slot  TEXT,
+    status         TEXT NOT NULL DEFAULT 'normal'
 );
 CREATE TABLE IF NOT EXISTS recipes_known (
     user_id     INTEGER NOT NULL,
@@ -367,10 +368,44 @@ CREATE TABLE IF NOT EXISTS market_trades (
     tax         INTEGER NOT NULL,
     created_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS auctions (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_id      INTEGER NOT NULL,
+    kind           TEXT NOT NULL,
+    item_key       TEXT,
+    instance_id    INTEGER,
+    qty            INTEGER,
+    start_price    INTEGER NOT NULL,
+    buyout         INTEGER,
+    current_bid    INTEGER,
+    current_bidder INTEGER,
+    end_at         INTEGER NOT NULL,
+    extend_count   INTEGER NOT NULL DEFAULT 0,
+    status         TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auction_bids (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    auction_id  INTEGER NOT NULL,
+    bidder_id   INTEGER NOT NULL,
+    amount      INTEGER NOT NULL,
+    bid_at      INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auction_escrow (
+    auction_id  INTEGER NOT NULL,
+    bidder_id   INTEGER NOT NULL,
+    amount      INTEGER NOT NULL,
+    PRIMARY KEY (auction_id, bidder_id)
+);
 CREATE INDEX IF NOT EXISTS idx_market_listings_notify
 ON market_listings(status, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_market_trades_audit
 ON market_trades(created_at, seller_id, buyer_id);
+CREATE INDEX IF NOT EXISTS idx_auctions_status_end
+ON auctions(status, end_at);
+CREATE INDEX IF NOT EXISTS idx_auctions_seller
+ON auctions(seller_id, status);
+CREATE INDEX IF NOT EXISTS idx_auction_bids_auction
+ON auction_bids(auction_id, bid_at);
 """
 
 
@@ -419,6 +454,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "pvp_ratings", "week_reputation", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "pvp_ratings", "week_tag", "TEXT")
     await _ensure_column(_conn, "item_instances", "enhance_level", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "item_instances", "status", "TEXT NOT NULL DEFAULT 'normal'")
     await _ensure_column(_conn, "sect_members", "donate_day", "TEXT")
     await _ensure_column(_conn, "sect_members", "donate_today", "INTEGER NOT NULL DEFAULT 0")
     # 迁移时留空(NULL)而非填默认值，使部署前的在途历练落入 _resolve 的"旧 run"兼容分支

@@ -14,6 +14,7 @@ from __future__ import annotations
 import random
 
 from config import realms as R
+from config import auction as AUCTION
 from config import buffs as BUFFS
 from config import daohang as DAOHANG_CFG
 from config import dao_paths as DAO
@@ -398,12 +399,9 @@ def best_content_stone_per_stamina(realm: int) -> float:
 # 活动道行 / 飞升点为另一维产出，靠周上限与硬上限封顶。三者均须显式校验
 # 不破坏"内容产出/精力 < 首买精力成本/精力"的反套利红线。
 
-AUCTION_WHITELIST_MATERIALS = frozenset({
-    "星陨砂", "幽都魂晶", "天外残玉",
-    "雾泽虚砂", "裂海空髓", "混沌残核",
-})
+AUCTION_WHITELIST_MATERIALS = AUCTION.MATERIAL_WHITELIST
 AUCTION_WHITELIST_REALMS = (4, 5)
-WHITELIST_MARKET_VALUE_MULTIPLIER = 3.0
+WHITELIST_MARKET_VALUE_MULTIPLIER = AUCTION.MATERIAL_MARKET_VALUE_MULTIPLIER
 
 
 def auction_material_value(key: str) -> float:
