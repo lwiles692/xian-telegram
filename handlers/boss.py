@@ -1,5 +1,6 @@
-"""/boss —— 群内世界 Boss。"""
 from __future__ import annotations
+
+"""/boss —— 群内世界 Boss。"""
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -57,6 +58,8 @@ def _challenge_text(res: dict) -> str:
         ]
         if res.get("daohang"):
             lines.append(f"道行 +{res['daohang']}。")
+        if res.get("partner_combo"):
+            lines.append(res["partner_combo"])
         if res["defeated"]:
             lines.append(world_boss.reward_text(res["rewards"]))
         return "\n".join(line for line in lines if line)

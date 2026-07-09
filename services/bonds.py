@@ -284,6 +284,84 @@ async def can_start_partner_request(a_id: int, b_id: int, now: int = None) -> di
         return await _can_start_partner_request_conn(conn, a_id, b_id, now)
 
 
+async def preview_partner_request(a_id: int, b_id: int,
+                                  initiator_id: int, now: int = None) -> dict:
+    """结契帖发起前预览：handler 用于确认页，不直接写入。"""
+    now = _now(now)
+    if initiator_id not in (a_id, b_id):
+        return {"status": "forbidden"}
+    async with db.transaction() as conn:
+        check = await _can_start_partner_request_conn(conn, a_id, b_id, now)
+        a_name = await _name_conn(conn, a_id)
+        b_name = await _name_conn(conn, b_id)
+    return {**check, "a_id": a_id, "b_id": b_id, "initiator_id": initiator_id,
+            "a_name": a_name, "b_name": b_name}
+
+
+async def partner_overview(user_id: int, now: int = None) -> dict:
+    """道侣界面概览：active 道侣、待确认结契帖、赠礼物品与共修邀约。"""
+    now = _now(now)
+    async with db.transaction() as conn:
+        cur = await conn.execute("SELECT 1 FROM characters WHERE user_id=?", (user_id,))
+        char = await cur.fetchone()
+        await cur.close()
+        if not char:
+            return {"status": "missing"}
+        cur = await conn.execute(
+            "SELECT b.*, ua.username AS user_name, ub.username AS partner_name "
+            "FROM social_bonds b "
+            "LEFT JOIN users ua ON ua.tg_user_id=b.a_id "
+            "LEFT JOIN users ub ON ub.tg_user_id=b.b_id "
+            "WHERE b.kind=? AND b.a_id=? "
+            "AND b.status IN (?,?) "
+            "AND (b.status<>? OR b.expires_at IS NULL OR b.expires_at>?) "
+            "ORDER BY b.updated_at DESC, b.id DESC",
+            (CFG.KIND_PARTNER, user_id, CFG.STATUS_ACTIVE, CFG.STATUS_PENDING,
+             CFG.STATUS_PENDING, now))
+        rows = await cur.fetchall()
+        await cur.close()
+        cooldown = await _cooldown_until_conn(conn, user_id, now, kind=CFG.KIND_PARTNER)
+
+        active_partner = None
+        pending_incoming = []
+        pending_outgoing = []
+        for row in rows:
+            item = _partner_payload(row)
+            if row["status"] == CFG.STATUS_ACTIVE and active_partner is None:
+                active_partner = item
+            elif row["status"] == CFG.STATUS_PENDING and row["initiator_id"] == user_id:
+                pending_outgoing.append(item)
+            elif row["status"] == CFG.STATUS_PENDING:
+                pending_incoming.append(item)
+
+        gift_items = []
+        open_communion = None
+        if active_partner:
+            gift_items = await _partner_gift_items_conn(conn, user_id)
+            cur = await conn.execute(
+                "SELECT * FROM communion_sessions "
+                "WHERE kind=? AND status IN ('pending','active') "
+                "AND (a_id=? OR b_id=?) "
+                "AND (status<>'pending' OR expires_at>?) "
+                "ORDER BY updated_at DESC, id DESC LIMIT 1",
+                (CFG.KIND_PARTNER, user_id, user_id, now))
+            session = await cur.fetchone()
+            await cur.close()
+            if session:
+                open_communion = _communion_payload(session, user_id)
+    return {
+        "status": "ok",
+        "user_id": user_id,
+        "title": CFG.PARTNER_TITLE,
+        "active_partner": active_partner,
+        "pending_incoming": pending_incoming,
+        "pending_outgoing": pending_outgoing,
+        "cooldown_until": cooldown,
+        "gift_items": gift_items,
+        "open_communion": open_communion,
+    }
+
+
 async def create_pending_partner_request(a_id: int, b_id: int,
                                          initiator_id: int | None = None,
                                          now: int = None) -> dict:
@@ -744,6 +822,54 @@ def _bond_payload(row) -> dict:
         "expires_at": row["expires_at"],
         "activated_at": row["activated_at"],
         "updated_at": row["updated_at"],
+    }
+
+
+def _partner_payload(row) -> dict:
+    return {
+        "bond_id": row["id"],
+        "kind": row["kind"],
+        "user_id": row["a_id"],
+        "partner_id": row["b_id"],
+        "user_name": row["user_name"] or str(row["a_id"]),
+        "partner_name": row["partner_name"] or str(row["b_id"]),
+        "initiator_id": row["initiator_id"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
+        "activated_at": row["activated_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+async def _partner_gift_items_conn(conn, user_id: int) -> list[dict]:
+    allowed = sorted(CFG.PARTNER_DAILY_GIFT_WHITELIST)
+    if not allowed:
+        return []
+    placeholders = ",".join("?" for _ in allowed)
+    cur = await conn.execute(
+        "SELECT item_key, qty FROM inventory "
+        f"WHERE user_id=? AND bound=1 AND qty>0 AND item_key IN ({placeholders}) "
+        "ORDER BY item_key",
+        (user_id, *allowed))
+    rows = await cur.fetchall()
+    await cur.close()
+    return [{"item_key": row["item_key"], "qty": int(row["qty"])} for row in rows]
+
+
+def _communion_payload(row, user_id: int) -> dict:
+    other_id = row["b_id"] if int(row["a_id"]) == int(user_id) else row["a_id"]
+    return {
+        "session_id": int(row["id"]),
+        "kind": row["kind"],
+        "status": row["status"],
+        "initiator_id": row["initiator_id"],
+        "confirmer_id": row["confirmer_id"],
+        "other_id": other_id,
+        "invited_at": row["invited_at"],
+        "expires_at": row["expires_at"],
+        "start_at": row["start_at"],
+        "end_at": row["end_at"],
     }
 
 

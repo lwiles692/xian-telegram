@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 import pytest_asyncio
 
@@ -60,6 +62,7 @@ async def test_top_level_feature_pages_do_not_embed_full_main_menu(temp_db):
         ("储物袋", await bag_handler.render_bag(uid)),
         ("悬赏", await quest_handler.render_quest(uid)),
         ("师徒", await bonds_handler.render_master(uid)),
+        ("道侣", await bonds_handler.render_partner(uid)),
         ("宗门", await sect_handler.render_sect(uid)),
         ("道途", await dao_path_handler.render_path(uid)),
         ("飞升", await ascension_handler.render_ascension(uid)),

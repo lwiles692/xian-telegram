@@ -13,7 +13,7 @@ from config.items import item_name
 from config.skills import skill_name
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
                              menu_with_breakthrough, progress_bar, show)
-from services import character, quests
+from services import bonds as bonds_service, character, quests
 
 router = Router()
 
@@ -45,6 +45,10 @@ async def render_me(user_id: int):
         "📖 心法：" + (skill_name(mind) if mind else "无"),
         "📖 战技：" + ("、".join(skill_name(s) for s in skills) if skills else "无"),
     ]
+    partner = await bonds_service.partner_overview(user_id)
+    if partner["status"] == "ok" and partner["active_partner"]:
+        active = partner["active_partner"]
+        lines.append(f"💞 道侣：{active['partner_name']}（{partner['title']}）")
     if overflow.get("active"):
         lines.append(f"🌌 溢出分流：{overflow['label']}")
     if int(char.debuff_json.get("unstable_until", 0)) > int(time.time()):

@@ -10,7 +10,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from config import daohang as DAOHANG
 from config.bosses import (DEFAULT_BOSS, WORLD_BOSSES, WORLD_BOSS_FULL_HP_CULTIVATORS,
                            boss_key_for_realm, canonical_boss_key)
-from config import ascension as ASC_CFG
+from config import ascension as ASC_CFG, bonds as BONDS
 from config.items import item_name
 from handlers.common import action_callback_data
 from services import ascension, character, game_events
@@ -332,6 +332,7 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
         if remaining <= 0:
             defeated = True
             rewards = await _distribute(conn, current["id"], cfg, now)
+        partner_combo = await _partner_combo_flavor_conn(conn, current["id"], user_id)
         await game_events.emit_conn(
             conn, user_id, "world_boss.challenge",
             {"boss_key": current["boss_key"], "boss_name": cfg["name"],
@@ -341,7 +342,29 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
     return {"status": "ok", "damage": damage, "remaining_hp": remaining,
             "total_hp": boss["total_hp"], "boss_name": cfg["name"], "defeated": defeated,
             "leaderboard": leaderboard, "rewards": rewards, "boss_id": boss["id"],
-            "stamina_left": reserve["stamina_left"], "daohang": challenge_daohang}
+            "stamina_left": reserve["stamina_left"], "daohang": challenge_daohang,
+            "partner_combo": partner_combo}
+
+
+async def _partner_combo_flavor_conn(conn, boss_id: int, user_id: int) -> str | None:
+    cur = await conn.execute(
+        "SELECT b.b_id, u.username FROM social_bonds b "
+        "LEFT JOIN users u ON u.tg_user_id=b.b_id "
+        "WHERE b.kind=? AND b.status=? AND b.a_id=? LIMIT 1",
+        (BONDS.KIND_PARTNER, BONDS.STATUS_ACTIVE, user_id))
+    bond = await cur.fetchone()
+    await cur.close()
+    if not bond:
+        return None
+    cur = await conn.execute(
+        "SELECT damage FROM world_boss_damage WHERE boss_id=? AND user_id=?",
+        (boss_id, bond["b_id"]))
+    damage = await cur.fetchone()
+    await cur.close()
+    if not damage or int(damage["damage"] or 0) <= 0:
+        return None
+    partner_name = bond["username"] or str(bond["b_id"])
+    return f"💞 与道侣{partner_name}并肩合击，灵犀相照。"
 
 
 async def _distribute(conn, boss_id: int, cfg: dict, now: int = None):

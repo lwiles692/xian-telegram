@@ -28,6 +28,7 @@ HELP = (
     "/daily — 每日签到\n"
     "/quest — 悬赏与七日引导\n"
     "/master — 师徒传承\n"
+    "/partner — 道侣结契与共修\n"
     "/bag — 查看储物袋\n"
     "/help — 重览此卷\n\n"
     "大道三千，愿道友早证长生。"

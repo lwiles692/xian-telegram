@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 
 from config import realms as R
-from handlers import bonds as bonds_handler
+from handlers import bonds as bonds_handler, me as me_handler
 from models import db
 from services import bonds, character
 
@@ -73,6 +73,16 @@ async def _备好师徒资质(mentor_id: int, disciple_id: int):
     await character.set_progress(disciple_id, 1, R.num_stages(1) - 1, 0)
 
 
+async def _备好道侣资质(a_id: int, b_id: int):
+    from config import bonds as BONDS
+
+    await character.create(a_id, f"道侣{a_id}")
+    await character.set_progress(a_id, 2, 0, 0)
+    await character.create(b_id, f"道侣{b_id}")
+    await character.set_progress(b_id, 2, 0, 0)
+    await character.add_item(a_id, BONDS.PARTNER_TOKEN_ITEM, 1, bound=1)
+
+
 async def _记住群(user_id: int, chat_id: int, now: int):
     await db.execute(
         "INSERT INTO bot_chats(chat_id, title, last_seen_at) VALUES(?,?,?) "
@@ -95,11 +105,32 @@ async def _激活师徒(mentor_id: int, disciple_id: int, now: int) -> int:
     return pending["bond_id"]
 
 
+async def _激活道侣(a_id: int, b_id: int, now: int) -> dict:
+    await _备好道侣资质(a_id, b_id)
+    pending = await bonds.create_pending_partner_request(
+        a_id, b_id, initiator_id=a_id, now=now)
+    assert pending["status"] == "ok"
+    confirmed = await bonds.confirm_pending_partner_request(
+        pending["bond_id"], confirmer_id=b_id, now=now + 1)
+    assert confirmed["status"] == "ok"
+    return confirmed
+
+
 @pytest.mark.asyncio
 async def test_master_群内入口被私聊护法拦下(temp_db):
     msg = _Message(7001, "/master", chat_type="group")
 
     await bonds_handler.cmd_master(msg)
+
+    assert msg.answers
+    assert "养成诸事请移步私聊" in msg.answers[0][0]
+
+
+@pytest.mark.asyncio
+async def test_partner_群内入口被私聊护法拦下(temp_db):
+    msg = _Message(7101, "/partner", chat_type="group")
+
+    await bonds_handler.cmd_partner(msg)
 
     assert msg.answers
     assert "养成诸事请移步私聊" in msg.answers[0][0]
@@ -115,6 +146,73 @@ async def test_master_收徒确认页公示重拜代价(temp_db):
 
     assert "解除后重拜，出师累计活跃天数从 0 重计" in text
     assert any(data.startswith("bond:create:") for data in datas)
+
+
+@pytest.mark.asyncio
+async def test_partner_结契确认与道侣首页走一次性令牌(temp_db):
+    a_id, b_id = 7111, 7112
+    now = 210_000
+    await _备好道侣资质(a_id, b_id)
+
+    text, markup = await bonds_handler.render_partner_request_confirm(a_id, b_id)
+    create_data = next(data for data in _datas(markup) if data.startswith("bond:pcreate:"))
+    created = _Callback(a_id, create_data)
+    await bonds_handler.cb_bond_action(created)
+    pending = await db.fetchone(
+        "SELECT * FROM social_bonds WHERE kind='partner' AND a_id=? AND b_id=?",
+        (a_id, b_id))
+
+    assert "结契确认" in text
+    assert "同心结" in text
+    assert pending["status"] == "pending"
+    assert "结契帖已递出" in created.message.edits[-1][0]
+
+    again = _Callback(a_id, create_data)
+    await bonds_handler.cb_bond_action(again)
+    assert again.answers and again.answers[0][1] is True
+
+    incoming_text, incoming_markup = await bonds_handler.render_partner(b_id)
+    confirm_data = next(data for data in _datas(incoming_markup) if data.startswith("bond:pconfirm:"))
+    confirmed = _Callback(b_id, confirm_data)
+    await bonds_handler.cb_bond_action(confirmed)
+    rows = await db.fetchall(
+        "SELECT status FROM social_bonds WHERE kind='partner' "
+        "AND ((a_id=? AND b_id=?) OR (a_id=? AND b_id=?))",
+        (a_id, b_id, b_id, a_id))
+
+    assert "待你确认的结契帖" in incoming_text
+    assert {row["status"] for row in rows} == {"active"}
+    assert "道侣名分" in confirmed.message.edits[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_partner_首页展示互赠共修与_me_称号(temp_db):
+    a_id, b_id = 7121, 7122
+    now = int(time.time())
+    await _激活道侣(a_id, b_id, now)
+    await character.add_item(a_id, "疗伤丹", 1, bound=1)
+
+    text, markup = await bonds_handler.render_partner(a_id)
+    datas = _datas(markup)
+    gift_data = next(data for data in datas if data.startswith("bond:pgift:"))
+    gift_cb = _Callback(a_id, gift_data)
+    await bonds_handler.cb_bond_action(gift_cb)
+    invited_text, invited_markup = await bonds_handler.render_partner(a_id)
+    invite_data = next(data for data in _datas(invited_markup)
+                       if data.startswith("bond:cminvite:"))
+    invite_cb = _Callback(a_id, invite_data)
+    await bonds_handler.cb_bond_action(invite_cb)
+    me_text, _me_markup = await me_handler.render_me(a_id)
+
+    assert "道侣：" in text
+    assert "今日可赠：疗伤丹×1" in text
+    assert any(data.startswith("bond:cminvite:") for data in datas)
+    assert "已赠出 疗伤丹×1" in gift_cb.message.edits[-1][0]
+    assert await character.item_qty(b_id, "疗伤丹", bound=1) == 1
+    assert "共修：本周可邀道侣" in invited_text
+    assert "共修帖已递出" in invite_cb.message.edits[-1][0]
+    assert "💞 道侣：" in me_text
+    assert "比翼同修" in me_text
 
 
 @pytest.mark.asyncio
@@ -185,4 +283,5 @@ def test_master_已注册到命令与路由():
     commands = [command.command for command in bot_app._COMMANDS]
 
     assert "master" in commands
+    assert "partner" in commands
     assert "bonds" in source

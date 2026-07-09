@@ -54,6 +54,7 @@ _COMMANDS = [
     BotCommand(command="daily", description="每日签到"),
     BotCommand(command="quest", description="悬赏任务"),
     BotCommand(command="master", description="师徒"),
+    BotCommand(command="partner", description="道侣共修"),
     BotCommand(command="bag", description="储物袋"),
     BotCommand(command="path", description="道途 / 转修"),
     BotCommand(command="ascension", description="飞升试炼"),
