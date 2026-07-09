@@ -1,5 +1,6 @@
-"""低频群播报与天梯 DM 通知队列。"""
 from __future__ import annotations
+
+"""低频群播报与天梯 DM 通知队列。"""
 
 import json
 import logging
@@ -119,6 +120,11 @@ def _group_text(event_type: str, payload: dict) -> str:
     if event_type == "breakthrough.big_success":
         label = payload.get("label") or R.realm_label(payload.get("target_realm", 0), payload.get("target_stage", 0))
         return f"✨ {name} 破境成功，晋入「{label}」。"
+    if event_type == "breakthrough.heart_success":
+        label = payload.get("label") or R.realm_label(payload.get("target_realm", 0), payload.get("target_stage", 0))
+        return f"🌀 {name} 直面心魔而不退，道心通明，晋入「{label}」。"
+    if event_type == "breakthrough.heart_fail":
+        return f"🌀 {name} 直面心魔失守，道基震荡，来日仍可再证本心。"
     if event_type == "explore.boss_win":
         return f"🐲 {name} 斩杀妖王「{payload.get('mob', '妖王')}」，满身风尘而归。"
     if event_type == "explore.rare_drop":

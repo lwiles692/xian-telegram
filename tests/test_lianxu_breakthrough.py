@@ -49,8 +49,8 @@ async def test_lianxu_breakthrough_enters_xukong_choices(temp_db, monkeypatch):
     step = await breakthrough.choose_tribulation_action(uid, "source", now=1002)
 
     assert start["status"] == "tribulation_choice"
-    assert [choice["key"] for choice in start["choices"]] == ["source", "artifact", "pill"]
-    assert [choice["label"] for choice in start["choices"]] == ["凝守本源", "祭护体法宝", "服大还丹"]
+    assert [choice["key"] for choice in start["choices"]] == ["source", "artifact", "pill", "heart"]
+    assert [choice["label"] for choice in start["choices"]] == ["凝守本源", "祭护体法宝", "服大还丹", "直面心魔"]
     assert "虚空劫未尽" in text
     assert old_choice["status"] == "bad_action"
     assert step["status"] == "tribulation_choice"

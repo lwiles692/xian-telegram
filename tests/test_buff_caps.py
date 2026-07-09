@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import json
 
 import pytest
 import pytest_asyncio
 
 from config import buffs as BUFFS
+from config import events as EVENT_CFG
 from config import realms as R
 from models import db
 from services import character, dao_path, items, settle
@@ -101,6 +104,31 @@ async def test_seclusion_percent_buffs_are_clamped(temp_db):
     await character.start_seclusion(uid, now=1000)
     res = await character.collect_seclusion(uid, now=4600)
     base = settle.seclusion_gain(0, 0, 1000, 4600, root_bone=0)
+
+    assert res["gained"] == settle.seclusion_gain(
+        0, 0, 1000, 4600, root_bone=0, place_factor=1 + BUFFS.SECLUSION_PCT_CAP)
+
+
+@pytest.mark.asyncio
+async def test_daoxin_tongming_seclusion_buff_enters_clamp(temp_db):
+    uid = 9205
+    await character.create(uid, "daoxincap")
+    await db.execute("UPDATE characters SET root_bone=0 WHERE user_id=?", (uid,))
+    state = {
+        "buffs": {
+            EVENT_CFG.HEART_TRIBULATION_BUFF_KEY: {
+                "until": 9_999_999_999,
+                "effects": {"seclusion_pct": EVENT_CFG.HEART_TRIBULATION_SECLUSION_PCT},
+            },
+            "test": {"until": 9_999_999_999, "effects": {"seclusion_pct": 1.0}},
+        }
+    }
+    await db.execute(
+        "UPDATE characters SET debuff_json=? WHERE user_id=?",
+        (json.dumps(state, ensure_ascii=False), uid))
+
+    await character.start_seclusion(uid, now=1000)
+    res = await character.collect_seclusion(uid, now=4600)
 
     assert res["gained"] == settle.seclusion_gain(
         0, 0, 1000, 4600, root_bone=0, place_factor=1 + BUFFS.SECLUSION_PCT_CAP)

@@ -1,8 +1,11 @@
-"""群播报与 DM 通知配置。"""
 from __future__ import annotations
+
+"""群播报与 DM 通知配置。"""
 
 DAILY_LIMITS = {
     "breakthrough.big_success": 2,
+    "breakthrough.heart_success": 2,
+    "breakthrough.heart_fail": 2,
     "explore.boss_win": 2,
     "explore.rare_drop": 1,
     "pvp.tier_up": 2,

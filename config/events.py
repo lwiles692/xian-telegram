@@ -1,7 +1,26 @@
-"""轻量可玩事件配置：历练奇遇与渡劫应对。"""
 from __future__ import annotations
 
+"""轻量可玩事件配置：历练奇遇与渡劫应对。"""
+
 ENCOUNTER_RATE = 0.12
+
+HEART_TRIBULATION_ACTION_KEY = "heart"
+HEART_TRIBULATION_REWARD_FLAG = "heart"
+HEART_TRIBULATION_BUFF_KEY = "daoxin_tongming"
+HEART_TRIBULATION_BUFF_NAME = "道心通明"
+HEART_TRIBULATION_BUFF_DURATION = 24 * 3600
+HEART_TRIBULATION_SECLUSION_PCT = 0.10
+HEART_TRIBULATION_DAOHANG = 8
+HEART_TRIBULATION_FAIL_EXTRA_LOSS_PCT = 0.05
+HEART_TRIBULATION_ACTION = {
+    "label": "直面心魔",
+    "shield": 0,
+    "heal_pct": 0.0,
+    "item": None,
+    "reward_flag": HEART_TRIBULATION_REWARD_FLAG,
+    "ignore_guard": True,
+    "text": "道友敞开心关，直面心魔，不借半分护持。",
+}
 
 ENCOUNTERS = {
     "cliff_cave": {
@@ -63,6 +82,7 @@ TRIBULATION_ACTIONS = {
         "item": None,
         "text": "不借外物，凝神硬抗雷劫。",
     },
+    HEART_TRIBULATION_ACTION_KEY: HEART_TRIBULATION_ACTION,
 }
 
 SHENHUN_TRIBULATION_ACTIONS = {
@@ -87,6 +107,7 @@ SHENHUN_TRIBULATION_ACTIONS = {
         "item": "大还丹",
         "text": "服下一枚大还丹，药力稳住翻涌气血。",
     },
+    HEART_TRIBULATION_ACTION_KEY: HEART_TRIBULATION_ACTION,
 }
 
 XUKONG_TRIBULATION_ACTIONS = {
@@ -111,4 +132,5 @@ XUKONG_TRIBULATION_ACTIONS = {
         "item": "大还丹",
         "text": "服下一枚大还丹，药力续住崩裂经脉。",
     },
+    HEART_TRIBULATION_ACTION_KEY: HEART_TRIBULATION_ACTION,
 }

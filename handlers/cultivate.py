@@ -103,14 +103,15 @@ def _bt_text(res: dict) -> str:
     if s == "big_success":
         tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
         rate = f"\n{_rate_text(res)}" if _rate_text(res) else ""
+        heart = _heart_success_text(res)
         if res["tribulation"]:
             trial = _trial_from_log(tail)
             if trial == "神魂劫":
-                return f"🌀 神魂劫已尽，心魔归寂——道友破妄凝神，臻至 {res['label']}！{rate}{tail}"
+                return f"🌀 神魂劫已尽，心魔归寂——道友破妄凝神，臻至 {res['label']}！{heart}{rate}{tail}"
             if trial == "虚空劫":
-                return f"🌌 虚空劫已尽，肉身归真——道友踏破虚无，臻至 {res['label']}！{rate}{tail}"
-            return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！{rate}{tail}"
-        return f"✨ 灵气灌顶，道友冲破桎梏，迈入 {res['label']}！{rate}"
+                return f"🌌 虚空劫已尽，肉身归真——道友踏破虚无，臻至 {res['label']}！{heart}{rate}{tail}"
+            return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！{heart}{rate}{tail}"
+        return f"✨ 灵气灌顶，道友冲破桎梏，迈入 {res['label']}！{heart}{rate}"
     if s == "big_fail":
         tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
         rate = f"\n{_rate_text(res)}" if _rate_text(res) else ""
@@ -124,9 +125,10 @@ def _bt_text(res: dict) -> str:
                 head = "⚡ 天劫凶猛"
         else:
             head = "✗ 冲关受阻"
+        heart = _heart_fail_text(res)
         return (
             f"{head}，道友未能破境，道基不稳（修为 −{res['loss']}，"
-            f"法身六维暂降），所幸未曾跌境。来日再战。{rate}{tail}"
+            f"法身六维暂降），所幸未曾跌境。来日再战。{heart}{rate}{tail}"
         )
     return "天机紊乱，突破未果。"
 
@@ -140,6 +142,22 @@ def _rate_text(res: dict) -> str:
         bonus = int(round(guarantee * 100))
         return f"本次破境成功率：{rate}%（保底+{bonus}%）。"
     return f"本次破境成功率：{rate}%。"
+
+
+def _heart_success_text(res: dict) -> str:
+    if not res.get("heart_reward"):
+        return ""
+    pct = int(round(float(res.get("seclusion_pct") or 0.0) * 100))
+    hours = int((res.get("buff_seconds") or 0) // 3600)
+    daohang = int(res.get("daohang") or 0)
+    return f"\n心魔既破，得「{res.get('buff') or '道心通明'}」{hours}小时：闭关效率+{pct}%，道行+{daohang}。"
+
+
+def _heart_fail_text(res: dict) -> str:
+    extra = int(res.get("extra_loss") or 0)
+    if not res.get("heart_reward") or extra <= 0:
+        return ""
+    return f"\n心魔反噬，额外折损修为 {extra}。"
 
 
 def _trial_copy(target_realm: int | None) -> tuple[str, str]:

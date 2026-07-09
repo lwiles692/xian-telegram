@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS tribulation_sessions (
     thunder_index INTEGER NOT NULL DEFAULT 1,
     seed          INTEGER NOT NULL,
     log_json      TEXT NOT NULL DEFAULT '[]',
+    reward_flag   TEXT,
     created_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS social_broadcasts (
@@ -439,6 +440,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "dungeon_jobs", "start_mp", "INTEGER")
     await _ensure_column(_conn, "ascension", "last_trial_week", "TEXT")
     await _ensure_column(_conn, "tribulation_sessions", "guarantee_bonus", "REAL NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "tribulation_sessions", "reward_flag", "TEXT")
     await _migrate_inventory_bound(_conn)
     await _migrate_sect_outposts_pk(_conn)
     await _conn.commit()

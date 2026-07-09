@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import random
 import time
@@ -190,8 +192,8 @@ async def test_yuanying_to_huashen_needs_pill_and_uses_shenhun_choices(temp_db, 
     res = await breakthrough.try_advance(uid, now=1000)
 
     assert res["status"] == "tribulation_choice"
-    assert [choice["key"] for choice in res["choices"]] == ["focus", "artifact", "pill"]
-    assert [choice["label"] for choice in res["choices"]] == ["凝神守一", "祭出护体法宝", "服大还丹"]
+    assert [choice["key"] for choice in res["choices"]] == ["focus", "artifact", "pill", "heart"]
+    assert [choice["label"] for choice in res["choices"]] == ["凝神守一", "祭出护体法宝", "服大还丹", "直面心魔"]
 
     res = await breakthrough.choose_tribulation_action(uid, "focus", now=1001)
     assert "神魂劫" in "".join(res["last_log"])
