@@ -17,6 +17,7 @@ ITEMS = {
     "妖丹":   {"name": "妖丹",     "type": "material", "sell": 18},
     "天材地宝": {"name": "天材地宝", "type": "material", "sell": 80},
     "器魂":   {"name": "器魂",     "type": "material", "sell": 6},
+    "同心结": {"name": "同心结", "type": "material", "sell": 0},
     # 困难图独占材料（#20）：留作后续炼丹/炼器/突破扩展，卖价偏低以免成为灵石 faucet。
     "阴风石": {"name": "阴风石",   "type": "material", "sell": 8},
     "幽冥草": {"name": "幽冥草",   "type": "material", "sell": 8},
@@ -107,7 +108,7 @@ ITEMS = {
 
 # 禁止玩家坊市交易的物品（spec §3.4 化神丹/炼虚丹不直售；§7.1/T5.4 转修令/保命符默认绑定）。
 # 掉落即以 bound=0 进包，但这些关键材料不得经坊市绕过 NPC 直售 / 转修成本 / 绑定语义。
-NO_TRADE = frozenset({"转修令", "化神丹", "炼虚丹", "保命符"})
+NO_TRADE = frozenset({"转修令", "化神丹", "炼虚丹", "保命符", "同心结"})
 
 
 def is_tradable(key: str) -> bool:

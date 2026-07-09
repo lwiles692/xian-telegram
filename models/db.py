@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS characters (
     stamina       INTEGER NOT NULL,
     stamina_at    INTEGER NOT NULL,
     seclusion_at  INTEGER,
+    last_seclusion_start INTEGER,
+    last_seclusion_end   INTEGER,
     spirit_stone  INTEGER NOT NULL DEFAULT 0,
     weapon_key    TEXT NOT NULL DEFAULT '新手剑',
     alchemy_prof  INTEGER NOT NULL DEFAULT 0,
@@ -365,6 +367,30 @@ CREATE TABLE IF NOT EXISTS bond_titles (
     unlocked_at INTEGER NOT NULL,
     PRIMARY KEY (user_id, title_key)
 );
+CREATE TABLE IF NOT EXISTS communion_sessions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind         TEXT NOT NULL,
+    bond_id      INTEGER,
+    a_id         INTEGER NOT NULL,
+    b_id         INTEGER NOT NULL,
+    initiator_id INTEGER NOT NULL,
+    confirmer_id INTEGER,
+    status       TEXT NOT NULL,
+    invited_at   INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL,
+    start_at     INTEGER,
+    end_at       INTEGER,
+    completed_at INTEGER,
+    updated_at   INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS communion_weekly_usage (
+    user_id    INTEGER NOT NULL,
+    week       TEXT NOT NULL,
+    session_id INTEGER NOT NULL,
+    kind       TEXT NOT NULL,
+    used_at    INTEGER NOT NULL,
+    PRIMARY KEY (user_id, week)
+);
 CREATE INDEX IF NOT EXISTS idx_bonds_a
 ON social_bonds(a_id, kind, status);
 CREATE INDEX IF NOT EXISTS idx_bonds_b
@@ -377,6 +403,10 @@ WHERE kind='mentor' AND status IN ('pending', 'active');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bonds_partner_a
 ON social_bonds(a_id)
 WHERE kind='partner' AND status IN ('pending', 'active');
+CREATE INDEX IF NOT EXISTS idx_communion_sessions_open
+ON communion_sessions(status, a_id, b_id);
+CREATE INDEX IF NOT EXISTS idx_communion_sessions_expire
+ON communion_sessions(status, expires_at);
 CREATE TABLE IF NOT EXISTS ascension (
     user_id     INTEGER PRIMARY KEY,
     level       INTEGER NOT NULL DEFAULT 0,
@@ -532,6 +562,9 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "stamina_buy_day", "TEXT")
     await _ensure_column(_conn, "characters", "pill_stamina_count", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "pill_stamina_day", "TEXT")
+    # spec-v3 §5.2 / T4.2：只保留最近一段已结算闭关区间，供道侣双修重叠折算。
+    await _ensure_column(_conn, "characters", "last_seclusion_start", "INTEGER")
+    await _ensure_column(_conn, "characters", "last_seclusion_end", "INTEGER")
     # spec-v3 §8.2：失败保底字段仅供化神→炼虚大突破读取；低境界大突破不读不写。
     await _ensure_column(_conn, "characters", "big_fail_streak", "INTEGER NOT NULL DEFAULT 0")
     # 当前气血/法力（#24）：可空，NULL ⇒ 视为满（旧存档零回填；首次结算按当前 max 落地）。

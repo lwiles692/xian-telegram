@@ -16,6 +16,8 @@ DAILY_LIMITS = {
     "mentor.milestone": 2,
     "mentor.graduate": 2,
     "mentor.title": 1,
+    "partner.active": 2,
+    "partner.dissolved": 1,
     "auction.high_price_sale": 2,
 }
 

@@ -153,6 +153,12 @@ def _group_text(event_type: str, payload: dict) -> str:
     if event_type == "mentor.title":
         title = payload.get("title", "桃李名师")
         return f"🏅 {name} 桃李渐成林，获尊号「{title}」。"
+    if event_type == "partner.active":
+        partner = payload.get("partner_name", "道侣")
+        return f"💞 {name} 与「{partner}」结为道侣，同参大道，自此灵犀相照。"
+    if event_type == "partner.dissolved":
+        partner = payload.get("partner_name", "旧侣")
+        return f"💔 {name} 与「{partner}」解契，各自归山，因缘暂歇。"
     if event_type == "auction.high_price_sale":
         item = payload.get("item", "拍品")
         qty = payload.get("qty") or 1

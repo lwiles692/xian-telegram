@@ -24,6 +24,8 @@ SHOP_OFFERS = {
                      "reward_qty": 1, "material_cost": 4},
     "path_material": {"name": "天外残玉", "reward_kind": "item", "reward_item": "天外残玉",
                       "reward_qty": 1, "material_cost": 5},
+    "heart_knot": {"name": "同心结", "reward_kind": "item", "reward_item": "同心结",
+                   "reward_qty": 1, "material_cost": 6},
     "ascension": {"name": "飞升点", "reward_kind": "ascension",
                   "reward_qty": 1, "material_cost": 3},
 }

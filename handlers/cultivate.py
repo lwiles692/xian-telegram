@@ -25,6 +25,10 @@ def _collect_text(res: dict) -> str:
         lines.append(f"溢出分流：{overflow['label']}")
     if res.get("overflow_notice"):
         lines.append(res["overflow_notice"])
+    partner_minutes = int(res.get("partner_overlap_seconds") or 0) // 60
+    partner_extra = int(res.get("partner_extra_cultivation") or 0)
+    if partner_minutes > 0 and partner_extra > 0:
+        lines.append(f"与道侣同参 {partner_minutes} 分钟，双修额外修为 +{partner_extra}。")
     if res.get("seclusion_cap_reached"):
         lines.append("已达闭关增益上限，超出的传承与灵效暂化作稳固根基。")
     if res["can_advance"]:

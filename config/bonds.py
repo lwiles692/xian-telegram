@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""师徒 / 道侣关系配置（spec-v3 §4 / M3）。"""
+"""师徒 / 道侣关系配置（spec-v3 §4 / §5）。"""
 
 KIND_MENTOR = "mentor"
 KIND_PARTNER = "partner"
@@ -28,6 +28,15 @@ MAX_ACTIVE_DISCIPLES = 3
 # T3.2/T3.5：师父至少元婴，徒弟至多筑基圆满；服务层统一读取，避免各处自解。
 MENTOR_MIN_REALM = 3
 DISCIPLE_MAX_REALM = 1
+
+# T4.1：道侣结契门槛与消耗。服务层后续只读这些常量，避免各处自解。
+PARTNER_MIN_REALM = 2
+PARTNER_TOKEN_ITEM = "同心结"
+PARTNER_KNOT_ITEM = PARTNER_TOKEN_ITEM
+PARTNER_DISSOLVE_STONE_COST = 50_000
+
+# T4.2：双修只占闭关增益切片，后续接入 SECLUSION clamp。
+PARTNER_SECLUSION_PCT = 0.05
 
 # T3.3：出师前 active 徒弟闭关效率 +5%，并入 SECLUSION clamp，不提高总上限。
 DISCIPLE_SECLUSION_PCT = 0.05
@@ -67,3 +76,22 @@ MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE = 30
 # T3.7：徒弟完成七日引导时的师徒联动小额奖励，跟教学行为直接绑定。
 ONBOARDING_DISCIPLE_LINK_REWARD = {"stone": 40, "bound_items": {"疗伤丹": 1}}
 ONBOARDING_MENTOR_LINK_REWARD = {"stone": 40}
+
+# T4.3：道侣每日互赠白名单；赠出后仍为绑定，只允许低套利空间的丹药 / 材料。
+PARTNER_DAILY_GIFT_QTY = 1
+PARTNER_DAILY_GIFT_WHITELIST = frozenset({
+    "疗伤丹",
+    "补灵丹",
+    "大还丹",
+    "虎力丹",
+    "凝神丹",
+    "灵草",
+    "玄铁矿",
+    "兽皮",
+    "妖丹",
+    "天材地宝",
+})
+
+
+def is_partner_gift_allowed(item_key: str) -> bool:
+    return item_key in PARTNER_DAILY_GIFT_WHITELIST

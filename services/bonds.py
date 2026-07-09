@@ -40,21 +40,35 @@ async def expire_pending(now: int = None) -> dict:
     return {"status": "ok", "expired": int(expired)}
 
 
-async def cooldown_until(user_id: int, now: int = None) -> int | None:
+async def cooldown_until(user_id: int, now: int = None,
+                         kind: str | None = None) -> int | None:
     """解除关系后的 7 天冷却；只读取 dissolved，不把拒绝/超时算作冷却。"""
     now = _now(now)
-    row = await db.fetchone(
-        "SELECT MAX(dissolved_at) AS last_at FROM social_bonds "
-        "WHERE status=? AND dissolved_at IS NOT NULL AND (a_id=? OR b_id=?)",
-        (CFG.STATUS_DISSOLVED, user_id, user_id))
+    if kind is None:
+        row = await db.fetchone(
+            "SELECT MAX(dissolved_at) AS last_at FROM social_bonds "
+            "WHERE status=? AND dissolved_at IS NOT NULL AND (a_id=? OR b_id=?)",
+            (CFG.STATUS_DISSOLVED, user_id, user_id))
+    else:
+        row = await db.fetchone(
+            "SELECT MAX(dissolved_at) AS last_at FROM social_bonds "
+            "WHERE kind=? AND status=? AND dissolved_at IS NOT NULL AND (a_id=? OR b_id=?)",
+            (kind, CFG.STATUS_DISSOLVED, user_id, user_id))
     return _cooldown_until_from_row(row, now)
 
 
-async def _cooldown_until_conn(conn, user_id: int, now: int) -> int | None:
-    cur = await conn.execute(
-        "SELECT MAX(dissolved_at) AS last_at FROM social_bonds "
-        "WHERE status=? AND dissolved_at IS NOT NULL AND (a_id=? OR b_id=?)",
-        (CFG.STATUS_DISSOLVED, user_id, user_id))
+async def _cooldown_until_conn(conn, user_id: int, now: int,
+                               kind: str | None = None) -> int | None:
+    if kind is None:
+        cur = await conn.execute(
+            "SELECT MAX(dissolved_at) AS last_at FROM social_bonds "
+            "WHERE status=? AND dissolved_at IS NOT NULL AND (a_id=? OR b_id=?)",
+            (CFG.STATUS_DISSOLVED, user_id, user_id))
+    else:
+        cur = await conn.execute(
+            "SELECT MAX(dissolved_at) AS last_at FROM social_bonds "
+            "WHERE kind=? AND status=? AND dissolved_at IS NOT NULL AND (a_id=? OR b_id=?)",
+            (kind, CFG.STATUS_DISSOLVED, user_id, user_id))
     row = await cur.fetchone()
     await cur.close()
     return _cooldown_until_from_row(row, now)
@@ -263,6 +277,115 @@ async def decline_pending_mentor_request(bond_id: int, user_id: int,
     return {"status": "ok", "bond_id": int(bond_id)}
 
 
+async def can_start_partner_request(a_id: int, b_id: int, now: int = None) -> dict:
+    """T4.1 结契发起前置检查：双方金丹期、一人一侣、解契冷却。"""
+    now = _now(now)
+    async with db.transaction() as conn:
+        return await _can_start_partner_request_conn(conn, a_id, b_id, now)
+
+
+async def create_pending_partner_request(a_id: int, b_id: int,
+                                         initiator_id: int | None = None,
+                                         now: int = None) -> dict:
+    """创建待确认结契帖；pending 即写镜像双行，交给唯一索引护住一人一侣。"""
+    now = _now(now)
+    initiator_id = a_id if initiator_id is None else int(initiator_id)
+    if initiator_id not in (a_id, b_id):
+        return {"status": "forbidden"}
+    async with db.transaction() as conn:
+        check = await _can_start_partner_request_conn(conn, a_id, b_id, now)
+        if check["status"] != "ok":
+            return check
+        try:
+            cur = await conn.execute(
+                "INSERT INTO social_bonds("
+                "kind, a_id, b_id, initiator_id, status, created_at, expires_at, updated_at"
+                ") VALUES(?,?,?,?,?,?,?,?)",
+                (CFG.KIND_PARTNER, a_id, b_id, initiator_id, CFG.STATUS_PENDING,
+                 now, now + CFG.PENDING_EXPIRE_SECONDS, now))
+            bond_id = int(cur.lastrowid)
+            await cur.close()
+            cur = await conn.execute(
+                "INSERT INTO social_bonds("
+                "kind, a_id, b_id, initiator_id, status, created_at, expires_at, updated_at"
+                ") VALUES(?,?,?,?,?,?,?,?)",
+                (CFG.KIND_PARTNER, b_id, a_id, initiator_id, CFG.STATUS_PENDING,
+                 now, now + CFG.PENDING_EXPIRE_SECONDS, now))
+            mirror_bond_id = int(cur.lastrowid)
+            await cur.close()
+        except sqlite3.IntegrityError:
+            return {"status": "already_has_partner"}
+    return {"status": "ok", "bond_id": bond_id, "mirror_bond_id": mirror_bond_id,
+            "a_id": a_id, "b_id": b_id, "initiator_id": initiator_id}
+
+
+async def confirm_pending_partner_request(bond_id: int, confirmer_id: int,
+                                          now: int = None) -> dict:
+    """另一方确认结契后，消耗一枚绑定同心结并激活镜像双行。"""
+    now = _now(now)
+    from services import character as character_service
+
+    async with db.transaction() as conn:
+        bond = await _bond_row_conn(conn, bond_id)
+        if not bond:
+            return {"status": "not_found"}
+        if bond["kind"] != CFG.KIND_PARTNER:
+            return {"status": "bad_kind"}
+        if bond["status"] != CFG.STATUS_PENDING:
+            return {"status": "not_pending", "bond_status": bond["status"]}
+        if int(bond["expires_at"] or 0) and int(bond["expires_at"]) <= now:
+            await _mark_partner_pair_status_conn(conn, bond, CFG.STATUS_EXPIRED, now)
+            return {"status": "expired"}
+        if confirmer_id not in (bond["a_id"], bond["b_id"]):
+            return {"status": "forbidden"}
+        if bond["initiator_id"] is not None and confirmer_id == bond["initiator_id"]:
+            return {"status": "need_counterparty"}
+        mirror = await _partner_mirror_row_conn(conn, bond)
+        if not mirror:
+            return {"status": "mirror_missing"}
+        if mirror["status"] != CFG.STATUS_PENDING:
+            return {"status": "not_pending", "bond_status": mirror["status"]}
+        gate = await _can_activate_partner_bond_conn(conn, bond, now)
+        if gate["status"] != "ok":
+            return gate
+
+        token_owner = await _partner_token_owner_conn(conn, bond, confirmer_id)
+        if token_owner is None:
+            return {"status": "no_token", "item": CFG.PARTNER_TOKEN_ITEM}
+        consumed = await character_service.consume_item_conn(
+            conn, token_owner, CFG.PARTNER_TOKEN_ITEM, 1, bound=1)
+        if not consumed:
+            return {"status": "no_token", "item": CFG.PARTNER_TOKEN_ITEM}
+
+        changed = await _mark_partner_pair_status_conn(
+            conn, bond, CFG.STATUS_ACTIVE, now, activated=True)
+        if changed != 2:
+            return {"status": "mirror_missing", "changed": changed}
+        await _emit_partner_event_conn(
+            conn, "partner.active", bond["a_id"], bond["b_id"], {}, now)
+    return {"status": "ok", "bond_id": int(bond_id), "mirror_bond_id": int(mirror["id"]),
+            "a_id": bond["a_id"], "b_id": bond["b_id"], "token_owner": token_owner}
+
+
+async def decline_pending_partner_request(bond_id: int, user_id: int,
+                                          now: int = None) -> dict:
+    """拒绝结契帖不落冷却；镜像双行一并归档。"""
+    now = _now(now)
+    async with db.transaction() as conn:
+        bond = await _bond_row_conn(conn, bond_id)
+        if not bond:
+            return {"status": "not_found"}
+        if bond["kind"] != CFG.KIND_PARTNER:
+            return {"status": "bad_kind"}
+        if user_id not in (bond["a_id"], bond["b_id"]):
+            return {"status": "forbidden"}
+        if bond["status"] != CFG.STATUS_PENDING:
+            return {"status": "not_pending", "bond_status": bond["status"]}
+        changed = await _mark_partner_pair_status_conn(
+            conn, bond, CFG.STATUS_DECLINED, now)
+    return {"status": "ok", "bond_id": int(bond_id), "changed": changed}
+
+
 async def dissolve_active_bond(bond_id: int, user_id: int, now: int = None) -> dict:
     """任一方可单方解除 active 关系；双方进入 7 日冷却。"""
     now = _now(now)
@@ -274,6 +397,8 @@ async def dissolve_active_bond(bond_id: int, user_id: int, now: int = None) -> d
             return {"status": "forbidden"}
         if bond["status"] != CFG.STATUS_ACTIVE:
             return {"status": "not_active", "bond_status": bond["status"]}
+        if bond["kind"] == CFG.KIND_PARTNER:
+            return await _dissolve_active_partner_bond_conn(conn, bond, user_id, now)
         cur = await conn.execute(
             "UPDATE social_bonds SET status=?, dissolved_at=?, updated_at=? "
             "WHERE id=? AND status=?",
@@ -670,6 +795,178 @@ async def _emit_mentor_event_conn(conn, event_type: str, mentor_id: int,
         {**payload, "mentor_id": mentor_id, "disciple_id": disciple_id,
          "mentor_name": mentor_name, "disciple_name": disciple_name,
          "name": mentor_name}, now)
+
+
+async def _can_start_partner_request_conn(conn, a_id: int, b_id: int,
+                                          now: int) -> dict:
+    if a_id == b_id:
+        return {"status": "bad_request"}
+    gate = await _partner_realm_gate_conn(conn, a_id, b_id)
+    if gate["status"] != "ok":
+        return gate
+    for user_id in (a_id, b_id):
+        until = await _cooldown_until_conn(conn, user_id, now, kind=CFG.KIND_PARTNER)
+        if until is not None:
+            return {"status": "cooldown", "user_id": user_id,
+                    "cooldown_until": until, "until": until}
+    conflict = await _partner_conflict_conn(
+        conn, a_id, b_id, (CFG.STATUS_PENDING, CFG.STATUS_ACTIVE))
+    if conflict:
+        return {"status": "already_has_partner",
+                "partner_id": conflict["b_id"], "bond_status": conflict["status"]}
+    return {"status": "ok"}
+
+
+async def _can_activate_partner_bond_conn(conn, bond, now: int) -> dict:
+    gate = await _partner_realm_gate_conn(conn, bond["a_id"], bond["b_id"])
+    if gate["status"] != "ok":
+        return gate
+    for user_id in (bond["a_id"], bond["b_id"]):
+        until = await _cooldown_until_conn(conn, user_id, now, kind=CFG.KIND_PARTNER)
+        if until is not None:
+            return {"status": "cooldown", "user_id": user_id,
+                    "cooldown_until": until, "until": until}
+    conflict = await _partner_conflict_conn(
+        conn, bond["a_id"], bond["b_id"], (CFG.STATUS_ACTIVE,), exclude_pair=True)
+    if conflict:
+        return {"status": "already_has_partner",
+                "partner_id": conflict["b_id"], "bond_status": conflict["status"]}
+    return {"status": "ok"}
+
+
+async def _partner_realm_gate_conn(conn, a_id: int, b_id: int) -> dict:
+    cur = await conn.execute(
+        "SELECT user_id, realm FROM characters WHERE user_id IN (?,?)",
+        (a_id, b_id))
+    rows = await cur.fetchall()
+    await cur.close()
+    by_id = {row["user_id"]: row for row in rows}
+    if a_id not in by_id or b_id not in by_id:
+        return {"status": "missing"}
+    for user_id in (a_id, b_id):
+        if int(by_id[user_id]["realm"]) < CFG.PARTNER_MIN_REALM:
+            return {"status": "realm_low", "user_id": user_id,
+                    "need_realm": CFG.PARTNER_MIN_REALM}
+    return {"status": "ok"}
+
+
+async def _partner_conflict_conn(conn, a_id: int, b_id: int, statuses: tuple[str, ...],
+                                 exclude_pair: bool = False):
+    placeholders = ",".join("?" for _ in statuses)
+    sql = (
+        "SELECT id, a_id, b_id, status FROM social_bonds "
+        f"WHERE kind=? AND status IN ({placeholders}) "
+        "AND (a_id IN (?,?) OR b_id IN (?,?))"
+    )
+    params: list[object] = [CFG.KIND_PARTNER, *statuses, a_id, b_id, a_id, b_id]
+    if exclude_pair:
+        sql += " AND NOT ((a_id=? AND b_id=?) OR (a_id=? AND b_id=?))"
+        params.extend([a_id, b_id, b_id, a_id])
+    sql += " ORDER BY updated_at DESC, id DESC LIMIT 1"
+    cur = await conn.execute(sql, tuple(params))
+    row = await cur.fetchone()
+    await cur.close()
+    return row
+
+
+async def _partner_mirror_row_conn(conn, bond):
+    cur = await conn.execute(
+        "SELECT * FROM social_bonds WHERE kind=? AND a_id=? AND b_id=? "
+        "ORDER BY id DESC LIMIT 1",
+        (CFG.KIND_PARTNER, bond["b_id"], bond["a_id"]))
+    row = await cur.fetchone()
+    await cur.close()
+    return row
+
+
+async def _partner_token_owner_conn(conn, bond, confirmer_id: int) -> int | None:
+    from services import character as character_service
+
+    candidates = []
+    for user_id in (bond["initiator_id"], confirmer_id, bond["a_id"], bond["b_id"]):
+        if user_id is not None and user_id not in candidates:
+            candidates.append(int(user_id))
+    for user_id in candidates:
+        qty = await character_service.item_qty_conn(
+            conn, user_id, CFG.PARTNER_TOKEN_ITEM, bound=1)
+        if qty > 0:
+            return user_id
+    return None
+
+
+async def _mark_partner_pair_status_conn(conn, bond, status: str, now: int,
+                                         activated: bool = False) -> int:
+    if activated or status == CFG.STATUS_ACTIVE:
+        cur = await conn.execute(
+            "UPDATE social_bonds SET status=?, activated_at=?, confirmed_at=?, "
+            "active_days=0, last_active_day=NULL, updated_at=? "
+            "WHERE kind=? AND status=? "
+            "AND ((a_id=? AND b_id=?) OR (a_id=? AND b_id=?))",
+            (status, now, now, now, CFG.KIND_PARTNER, CFG.STATUS_PENDING,
+             bond["a_id"], bond["b_id"], bond["b_id"], bond["a_id"]))
+    elif status == CFG.STATUS_DISSOLVED:
+        cur = await conn.execute(
+            "UPDATE social_bonds SET status=?, dissolved_at=?, updated_at=? "
+            "WHERE kind=? AND status=? "
+            "AND ((a_id=? AND b_id=?) OR (a_id=? AND b_id=?))",
+            (status, now, now, CFG.KIND_PARTNER, CFG.STATUS_ACTIVE,
+             bond["a_id"], bond["b_id"], bond["b_id"], bond["a_id"]))
+    else:
+        cur = await conn.execute(
+            "UPDATE social_bonds SET status=?, updated_at=? "
+            "WHERE kind=? AND status=? "
+            "AND ((a_id=? AND b_id=?) OR (a_id=? AND b_id=?))",
+            (status, now, CFG.KIND_PARTNER, CFG.STATUS_PENDING,
+             bond["a_id"], bond["b_id"], bond["b_id"], bond["a_id"]))
+    changed = int(cur.rowcount)
+    await cur.close()
+    return changed
+
+
+async def _dissolve_active_partner_bond_conn(conn, bond, user_id: int,
+                                             now: int) -> dict:
+    mirror = await _partner_mirror_row_conn(conn, bond)
+    if not mirror:
+        return {"status": "mirror_missing"}
+    if mirror["status"] != CFG.STATUS_ACTIVE:
+        return {"status": "not_active", "bond_status": mirror["status"]}
+    cur = await conn.execute(
+        "SELECT spirit_stone FROM characters WHERE user_id=?",
+        (user_id,))
+    char = await cur.fetchone()
+    await cur.close()
+    if not char:
+        return {"status": "missing"}
+    cost = CFG.PARTNER_DISSOLVE_STONE_COST
+    if int(char["spirit_stone"]) < cost:
+        return {"status": "no_stone", "need": cost, "have": int(char["spirit_stone"])}
+    changed = await _mark_partner_pair_status_conn(conn, bond, CFG.STATUS_DISSOLVED, now)
+    if changed != 2:
+        return {"status": "mirror_missing", "changed": changed}
+    await conn.execute(
+        "UPDATE characters SET spirit_stone=spirit_stone-? WHERE user_id=?",
+        (cost, user_id))
+    await _emit_partner_event_conn(
+        conn, "partner.dissolved", bond["a_id"], bond["b_id"], {}, now,
+        actor_id=user_id)
+    return {"status": "ok", "bond_id": int(bond["id"]), "mirror_bond_id": int(mirror["id"]),
+            "cost": cost, "cooldown_until": now + CFG.DISSOLVE_COOLDOWN_SECONDS}
+
+
+async def _emit_partner_event_conn(conn, event_type: str, a_id: int, b_id: int,
+                                   payload: dict, now: int,
+                                   actor_id: int | None = None) -> None:
+    from services import game_events
+
+    a_name = await _name_conn(conn, a_id)
+    b_name = await _name_conn(conn, b_id)
+    actor_id = a_id if actor_id is None else actor_id
+    actor_name = a_name if actor_id == a_id else b_name
+    partner_name = b_name if actor_id == a_id else a_name
+    await game_events.emit_conn(
+        conn, actor_id, event_type,
+        {**payload, "a_id": a_id, "b_id": b_id, "a_name": a_name, "b_name": b_name,
+         "partner_name": partner_name, "name": actor_name}, now)
 
 
 async def _mentor_realm_gate_conn(conn, mentor_id: int, disciple_id: int) -> dict:

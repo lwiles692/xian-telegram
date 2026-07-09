@@ -58,6 +58,12 @@ RECIPES = {
         "stone": 120, "materials": {"玄铁矿": 4, "妖丹": 2, "天材地宝": 1},
         "output": {"kind": "equipment", "key": "聚灵佩"}, "default": False,
     },
+    # spec-v3 §5.1/T4.1：同心结为道侣结契信物，炼器产出即绑定，不入坊市。
+    "partner_knot": {
+        "name": "同心结", "type": "forge", "realm": 2, "seconds": _minutes(20),
+        "stone": 500, "materials": {"玄铁矿": 8, "天材地宝": 1, "器魂": 2},
+        "output": {"kind": "item", "key": "同心结", "qty": 1, "bound": 1}, "default": True,
+    },
     "forge_yuanying_blade": {
         "name": "天魔刃", "type": "forge", "realm": 3, "seconds": _minutes(24),
         "stone": 980, "materials": {"雷纹玄铁": 4, "天魔残页": 3, "古战魂晶": 2, "器魂": 4},

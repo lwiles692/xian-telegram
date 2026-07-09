@@ -24,6 +24,8 @@ DAOHANG_PRE_CAP_RATE = 0.03
 OVERFLOW_DAOHANG_WEEKLY_CAP = 600
 # 当前最高大境界圆满溢出修为额外转飞升点（M3）；受下游周试炼与被动硬上限约束，故转化率保持不变。
 ASCENSION_FULL_REALM_RATE = 0.20
+# 道侣双修：只对重叠闭关秒数追加小幅闭关乘区，仍受调用方 SECLUSION clamp 截断。
+PARTNER_SECLUSION_PCT = 0.05
 
 
 def overflow_tier(realm: int, stage: int, now: int = None,
@@ -113,6 +115,68 @@ def regen_resource(cur: int, cap: int, at: int, now: int, seconds_per_full: int)
     return new_val, new_at
 
 
+def seclusion_settle_window(start_at: int, now: int,
+                            offline_cap_hours: int = OFFLINE_CAP_HOURS) -> tuple[int, int]:
+    """返回实际结算闭关区间；必须先按离线上限截断，再参与后续交集计算。"""
+    start_at = 0 if start_at is None else int(start_at)
+    now = start_at if now is None else int(now)
+    cap_seconds = int(max(0.0, float(offline_cap_hours)) * 3600)
+    finish_at = min(now, start_at + cap_seconds)
+    if finish_at < start_at:
+        finish_at = start_at
+    return start_at, finish_at
+
+
+def overlap_seconds(first_start: int, first_end: int,
+                    second_start: int, second_end: int) -> int:
+    """两个半开时间区间的重叠秒数。"""
+    start = max(int(first_start), int(second_start))
+    finish = min(int(first_end), int(second_end))
+    return max(0, finish - start)
+
+
+def partner_seclusion_overlap_seconds(
+        start_at: int,
+        now: int,
+        partner_start_at: int | None,
+        partner_end_at: int | None = None,
+        offline_cap_hours: int = OFFLINE_CAP_HOURS) -> int:
+    """双修重叠秒数：本方与道侣区间均先按离线上限截断，再求交集。"""
+    if partner_start_at is None:
+        return 0
+    own_start, own_end = seclusion_settle_window(start_at, now, offline_cap_hours)
+    partner_finish = now if partner_end_at is None else partner_end_at
+    partner_start, partner_end = seclusion_settle_window(
+        partner_start_at, partner_finish, offline_cap_hours)
+    return overlap_seconds(own_start, own_end, partner_start, partner_end)
+
+
+def partner_seclusion_extra_units(realm: int, stage: int, overlap: int,
+                                  root_bone: int = 0,
+                                  partner_pct: float = PARTNER_SECLUSION_PCT) -> int:
+    """道侣重叠秒数折算出的额外修为微单位。"""
+    overlap = max(0, int(overlap or 0))
+    partner_pct = max(0.0, float(partner_pct or 0.0))
+    if overlap <= 0 or partner_pct <= 0:
+        return 0
+    return int(
+        R.advance_cost(realm, stage)
+        * overlap
+        * (1 + max(0, root_bone) / 200)
+        * partner_pct
+        * CULTIVATION_SCALE
+        / R.seclusion_stage_seconds(realm)
+    )
+
+
+def partner_seclusion_extra_gain(realm: int, stage: int, overlap: int,
+                                 root_bone: int = 0,
+                                 partner_pct: float = PARTNER_SECLUSION_PCT) -> int:
+    """道侣重叠秒数折算出的额外修为整数值，供测试与文案展示。"""
+    return partner_seclusion_extra_units(
+        realm, stage, overlap, root_bone, partner_pct) // CULTIVATION_SCALE
+
+
 def seclusion_gain(realm: int, stage: int, start_at: int, now: int,
                    root_bone: int = 0,
                    place_factor: float = 1.0,
@@ -128,13 +192,13 @@ def seclusion_gain_with_remainder(realm: int, stage: int, start_at: int, now: in
                                   offline_cap_hours: int = OFFLINE_CAP_HOURS,
                                   remainder_units: int = 0,
                                   activity_windows: list[tuple[int, int]] = None,
-                                  active_factor: float = 1.0) -> tuple[int, int]:
+                                  active_factor: float = 1.0,
+                                  partner_overlap_seconds: int = 0,
+                                  partner_pct: float = 0.0) -> tuple[int, int]:
     """当前小阶 24 小时约得一级；根骨/外部加成再提速。"""
-    elapsed = min(now - start_at, offline_cap_hours * 3600)
-    if elapsed < 0:
-        elapsed = 0
+    settle_start, settle_finish = seclusion_settle_window(start_at, now, offline_cap_hours)
     effective_elapsed = _effective_elapsed(
-        start_at, start_at + elapsed, activity_windows or [], active_factor)
+        settle_start, settle_finish, activity_windows or [], active_factor)
     raw_units = int(
         R.advance_cost(realm, stage)
         * effective_elapsed
@@ -143,7 +207,10 @@ def seclusion_gain_with_remainder(realm: int, stage: int, start_at: int, now: in
         * CULTIVATION_SCALE
         / R.seclusion_stage_seconds(realm)
     )
+    partner_units = partner_seclusion_extra_units(
+        realm, stage, partner_overlap_seconds, root_bone, partner_pct)
     total_units = raw_units + max(0, int(remainder_units or 0))
+    total_units += partner_units
     return total_units // CULTIVATION_SCALE, total_units % CULTIVATION_SCALE
 
 
