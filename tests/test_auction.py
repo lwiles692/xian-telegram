@@ -4,9 +4,10 @@ import pytest
 import pytest_asyncio
 
 from config import auction as AUCTION
+from config import equipment as EQUIPMENT
 from config.items import NO_TRADE
 from models import db
-from services import auction, character
+from services import auction, character, equipment
 from tools import balance_sim as B
 
 
@@ -25,6 +26,15 @@ async def _create_instance(user_id: int, base_key: str = "玄铁剑") -> int:
         "SELECT id FROM item_instances WHERE user_id=? AND base_key=? ORDER BY id DESC LIMIT 1",
         (user_id, base_key))
     return row["id"]
+
+
+async def _create_auction_locked_instance(user_id: int) -> tuple[int, dict]:
+    await character.create(user_id, "托管修士")
+    await character.add_stone(user_id, 1000)
+    inst_id = await _create_instance(user_id, "玄铁剑")
+    listed = await auction.create_equipment_auction(user_id, inst_id, 500, now=1000)
+    assert listed["status"] == "ok"
+    return inst_id, listed
 
 
 @pytest.mark.asyncio
@@ -118,6 +128,87 @@ async def test_equipment_auction_locks_instance_and_charges_fee(temp_db):
 
     inst = await db.fetchone("SELECT status FROM item_instances WHERE id=?", (inst_id,))
     assert inst["status"] == AUCTION.INSTANCE_STATUS_AUCTION
+
+
+@pytest.mark.asyncio
+async def test_auction_locked_instance_cannot_be_equipped(temp_db):
+    uid = 7220
+    inst_id, _listed = await _create_auction_locked_instance(uid)
+
+    res = await character.equip_instance(uid, inst_id)
+
+    assert res["status"] == "locked"
+    inst = await db.fetchone("SELECT equipped_slot, status FROM item_instances WHERE id=?", (inst_id,))
+    assert inst["equipped_slot"] is None
+    assert inst["status"] == AUCTION.INSTANCE_STATUS_AUCTION
+
+
+@pytest.mark.asyncio
+async def test_auction_locked_instance_cannot_be_enhanced(temp_db):
+    uid = 7221
+    inst_id, _listed = await _create_auction_locked_instance(uid)
+    await character.add_item(uid, EQUIPMENT.QIHUN_KEY, 99)
+    before_stone = (await character.get(uid)).spirit_stone
+
+    res = await equipment.enhance(uid, inst_id)
+
+    assert res["status"] == "locked"
+    assert (await character.get(uid)).spirit_stone == before_stone
+    assert await character.item_qty(uid, EQUIPMENT.QIHUN_KEY) == 99
+
+
+@pytest.mark.asyncio
+async def test_auction_locked_instance_cannot_be_reforged(temp_db):
+    uid = 7222
+    inst_id, _listed = await _create_auction_locked_instance(uid)
+    await character.add_item(uid, EQUIPMENT.QIHUN_KEY, 99)
+    before_stone = (await character.get(uid)).spirit_stone
+
+    res = await equipment.reforge(uid, inst_id)
+
+    assert res["status"] == "locked"
+    assert (await character.get(uid)).spirit_stone == before_stone
+    assert await character.item_qty(uid, EQUIPMENT.QIHUN_KEY) == 99
+
+
+@pytest.mark.asyncio
+async def test_auction_locked_instance_cannot_be_decomposed(temp_db):
+    uid = 7223
+    inst_id, _listed = await _create_auction_locked_instance(uid)
+
+    res = await equipment.decompose(uid, inst_id)
+
+    assert res["status"] == "locked"
+    inst = await db.fetchone("SELECT status FROM item_instances WHERE id=?", (inst_id,))
+    assert inst["status"] == AUCTION.INSTANCE_STATUS_AUCTION
+    assert await character.item_qty(uid, EQUIPMENT.QIHUN_KEY) == 0
+
+
+@pytest.mark.asyncio
+async def test_auction_locked_instance_cannot_be_listed_again(temp_db):
+    uid = 7224
+    inst_id, _listed = await _create_auction_locked_instance(uid)
+    before_stone = (await character.get(uid)).spirit_stone
+
+    res = await auction.create_equipment_auction(uid, inst_id, 500, now=1001)
+
+    assert res["status"] == "locked"
+    assert (await character.get(uid)).spirit_stone == before_stone
+    rows = await db.fetchall(
+        "SELECT * FROM auctions WHERE seller_id=? AND instance_id=? AND status=?",
+        (uid, inst_id, AUCTION.STATUS_ACTIVE))
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_auction_locked_instance_action_reader_rejects_future_transfer_paths(temp_db):
+    uid = 7225
+    inst_id, _listed = await _create_auction_locked_instance(uid)
+
+    async with db.transaction() as conn:
+        lookup = await character.item_instance_for_action_conn(conn, uid, inst_id)
+
+    assert lookup == {"status": "locked"}
 
 
 @pytest.mark.asyncio

@@ -84,19 +84,14 @@ async def create_equipment_auction(seller_id: int, instance_id: int, start_price
     if err := _validate_buyout(start_price, buyout):
         return err
     async with db.transaction() as conn:
-        cur = await conn.execute(
-            "SELECT * FROM item_instances WHERE id=? AND user_id=?",
-            (instance_id, seller_id))
-        inst = await cur.fetchone()
-        await cur.close()
-        if not inst:
-            return {"status": "not_found"}
+        lookup = await character.item_instance_for_action_conn(conn, seller_id, instance_id)
+        if lookup["status"] != "ok":
+            return {"status": lookup["status"]}
+        inst = lookup["instance"]
         if not equipment_slot(inst["base_key"]):
             return {"status": "not_equipment"}
         if inst["equipped_slot"]:
             return {"status": "equipped"}
-        if inst["status"] != CFG.INSTANCE_STATUS_NORMAL:
-            return {"status": "locked"}
         floor = CFG.floor_price_for_tier(inst["tier"])
         if err := _validate_start_price(start_price, floor):
             return err

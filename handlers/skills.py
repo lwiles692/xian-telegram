@@ -1,10 +1,12 @@
-"""/skills —— 法宝与功法配置。"""
 from __future__ import annotations
+
+"""/skills —— 法宝与功法配置。"""
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from config import auction as auction_cfg
 from config.equipment import QIHUN_KEY
 from config.items import ITEMS, equipment_slot, format_bonus, item_name
 from config.skills import MIND_SLOT, skill_name
@@ -84,12 +86,13 @@ async def render_skills_category(user_id: int, cat: str):
     if cat == "equipment" and instances:
         lines.append(f"器魂 ×{qihun}，可用于强化/重铸。")
         for inst in instances:
-            mark = "已装备" if inst["equipped_slot"] else "未装备"
+            locked = inst.get("status") == auction_cfg.INSTANCE_STATUS_AUCTION
+            mark = "拍卖托管" if locked else ("已装备" if inst["equipped_slot"] else "未装备")
             lvl = inst.get("enhance_level", 0)
             lvl_txt = f"+{lvl} " if lvl else ""
             lines.append(
                 f"#{inst['id']} {lvl_txt}{item_name(inst['base_key'])}（{mark}，{_bonus_text(inst)}）")
-            if equipment_slot(inst["base_key"]):
+            if equipment_slot(inst["base_key"]) and not locked:
                 if not inst["equipped_slot"]:
                     rows.append([InlineKeyboardButton(
                         text=f"装备 {item_name(inst['base_key'])}",
@@ -138,6 +141,8 @@ def _result_text(res: dict) -> str:
         return f"{skill_name(res['skill'])} 已在战技栏中。"
     if s == "not_found":
         return "未寻得此法宝。"
+    if s == "locked":
+        return "此法宝正寄于拍卖行，暂不可装备。"
     return "天机不明，配置未变。"
 
 
@@ -191,6 +196,8 @@ def _eq_text(res: dict) -> str:
         return f"{res['item']} 不足（需 {res['need']}，余 {res['have']}）。"
     if s == "not_equipment":
         return "此物不可如此炼制。"
+    if s == "locked":
+        return "此法宝正寄于拍卖行，暂不可炼制。"
     if s == "not_equipped":
         return "该法宝未装备，无需卸下。"
     if s == "not_found":

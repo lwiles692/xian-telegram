@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from config import daohang as DAOHANG
 from config import realms as R
 from config import buffs as BUFFS
+from config import auction as auction_cfg
 from config.items import ITEMS, equipment_slot, item_name, weapon_bonus
 from config.equipment import ENHANCE_PER_LEVEL
 from config.sects import welfare as sect_welfare_config
@@ -701,7 +702,22 @@ def _instance_from_row(row) -> dict:
         "tier": row["tier"], "equipped_slot": row["equipped_slot"],
         "affixes": json.loads(row["affixes_json"] or "{}"),
         "enhance_level": row["enhance_level"] if "enhance_level" in row.keys() else 0,
+        "status": row["status"] if "status" in row.keys() else auction_cfg.INSTANCE_STATUS_NORMAL,
     }
+
+
+async def item_instance_for_action_conn(conn, user_id: int, instance_id: int) -> dict:
+    """读取可操作法宝实例；拍卖托管中的实例统一视为锁定。"""
+    cur = await conn.execute(
+        "SELECT * FROM item_instances WHERE id=? AND user_id=?",
+        (instance_id, user_id))
+    inst = await cur.fetchone()
+    await cur.close()
+    if not inst:
+        return {"status": "not_found"}
+    if inst["status"] != auction_cfg.INSTANCE_STATUS_NORMAL:
+        return {"status": "locked"}
+    return {"status": "ok", "instance": inst}
 
 
 async def item_qty(user_id: int, key: str, bound: int | None = None) -> int:
@@ -842,16 +858,14 @@ async def create_item_instance(user_id: int, base_key: str, tier: str = None, af
 
 async def equip_instance(user_id: int, instance_id: int) -> dict:
     async with db.transaction() as conn:
-        await _normalize_accessory_slots(conn, user_id)
-        cur = await conn.execute(
-            "SELECT * FROM item_instances WHERE id=? AND user_id=?", (instance_id, user_id))
-        inst = await cur.fetchone()
-        await cur.close()
-        if not inst:
-            return {"status": "not_found"}
+        lookup = await item_instance_for_action_conn(conn, user_id, instance_id)
+        if lookup["status"] != "ok":
+            return {"status": lookup["status"]}
+        inst = lookup["instance"]
         slot = equipment_slot(inst["base_key"])
         if not slot:
             return {"status": "not_equipment"}
+        await _normalize_accessory_slots(conn, user_id)
         target_slot = slot
         if slot == "accessory":
             cur = await conn.execute(
