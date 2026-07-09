@@ -90,7 +90,7 @@
 | **M2 拍卖行** | [v3-m2-auction.md](v3-m2-auction.md) | 英式拍卖+buyout、escrow 实扣、防狙击、实例托管、幂等结算、审计、曝光 | 否(独立开发独立验收) |
 | **M3 师徒+引导** | [v3-m3-mentor-onboarding.md](v3-m3-mentor-onboarding.md) | `social_bonds`/`bond_milestones`、拜师/出师、传功、周活跃回报、桃李称号、七日引导 | 否 |
 | **M4 道侣+共修** | [v3-m4-partner-ritual.md](v3-m4-partner-ritual.md) | 结契/解除、双修重叠折算、互赠、周双人任务、同步共修仪式(覆盖师徒/道侣) | 否 |
-| **M5 本命法宝雏形** | [v3-m5-natal-outline.md](v3-m5-natal-outline.md) | 认主/解缚、喂养成长、器修协同、clamp/交易隔离回归 | 否 |
+| **M5 本命法宝雏形** | [v3-m5-natal-outline.md](v3-m5-natal-outline.md) / [detail](v3-m5-natal-detail.md) | 认主/解缚、喂养成长、器修协同、clamp/交易隔离回归 | 否 |
 
 **推荐实施顺序**:M0(收口两项最先)→ M1 → M2 → M3 → M4 → M5。
 
