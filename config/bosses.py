@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """世界 Boss 配置（spec §5.3；分档重做见 #14）。
 
 设计口径（消除旧版 total_hp 与战斗假人尺度不一致的问题）：
@@ -7,7 +9,6 @@
 - ``total_hp``：群共享血池，由"目标群规模 × 目标人均挑战次数 × 该档典型(后期)
   玩家单次伤害"反推而来（约 36 次挑战量级，落在 10-20 人 × 2-4 次区间内）。
 """
-from __future__ import annotations
 
 WORLD_BOSSES = {
     "zhuji": {
@@ -46,6 +47,24 @@ WORLD_BOSSES = {
             "df": 3300, "spd": 780, "crit": 260, "skills": ["普攻", "快剑斩", "烈火诀", "金钟罩"],
         },
     },
+    "lianxu": {
+        "name": "吞虚魔蟒", "realm": 5, "total_hp": 1200000, "duration": 2 * 3600,
+        "stamina": 20, "stone_pool": 28000,
+        "drops": {
+            "雾泽虚砂": 6,
+            "裂海空髓": 5,
+            "混沌残核": 4,
+            "炼虚丹残方": 4,
+            "炼虚装备图纸残页": 4,
+            "天外残玉": 3,
+            "转修令": 2,
+        },
+        "combat": {
+            "name": "吞虚魔蟒", "hp": 100000000, "mp": 8000, "atk": 9000,
+            "df": 7000, "spd": 1700, "crit": 520,
+            "skills": ["普攻", "快剑斩", "烈火诀", "金钟罩"],
+        },
+    },
 }
 
 # Boss 血量按本群已知修仙者人数缩放；达到该人数后使用配置满血。
@@ -55,7 +74,7 @@ WORLD_BOSS_FULL_HP_CULTIVATORS = 10
 DEFAULT_BOSS = "zhuji"
 LEGACY_BOSS_ALIASES = {"ancient_dragon": "zhuji"}
 
-_REALM_TIER = {0: "zhuji", 1: "zhuji", 2: "jindan", 3: "yuanying", 4: "huashen"}
+_REALM_TIER = {0: "zhuji", 1: "zhuji", 2: "jindan", 3: "yuanying", 4: "huashen", 5: "lianxu"}
 
 
 def canonical_boss_key(key: str) -> str:
