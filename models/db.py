@@ -335,6 +335,14 @@ CREATE TABLE IF NOT EXISTS bond_daily_transfers (
     granted_at  INTEGER NOT NULL,
     PRIMARY KEY (bond_kind, a_id, b_id, active_day)
 );
+CREATE TABLE IF NOT EXISTS bond_titles (
+    user_id     INTEGER NOT NULL,
+    title_key   TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    threshold   INTEGER NOT NULL,
+    unlocked_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, title_key)
+);
 CREATE INDEX IF NOT EXISTS idx_bonds_a
 ON social_bonds(a_id, kind, status);
 CREATE INDEX IF NOT EXISTS idx_bonds_b

@@ -140,6 +140,16 @@ def _group_text(event_type: str, payload: dict) -> str:
         title = payload.get("title") or ""
         tail = f"，尊号「{title}」传开" if title else ""
         return f"🌌 {name} 飞升精进，「{passive}」圆满{tail}。"
+    if event_type == "mentor.milestone":
+        disciple = payload.get("disciple_name", "徒弟")
+        milestone = "金丹" if payload.get("milestone") == "jindan" else "元婴"
+        return f"📜 {name} 门下弟子「{disciple}」破入{milestone}，传承有成。"
+    if event_type == "mentor.graduate":
+        disciple = payload.get("disciple_name", "徒弟")
+        return f"🎓 {name} 门下弟子「{disciple}」功成出师，山门桃李又添一枝。"
+    if event_type == "mentor.title":
+        title = payload.get("title", "桃李名师")
+        return f"🏅 {name} 桃李渐成林，获尊号「{title}」。"
     if event_type == "auction.high_price_sale":
         item = payload.get("item", "拍品")
         qty = payload.get("qty") or 1

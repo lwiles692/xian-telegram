@@ -121,6 +121,17 @@ async def _师徒行(disciple_id: int):
         (disciple_id,))
 
 
+async def _记住群(user_id: int, chat_id: int, now: int):
+    await db.execute(
+        "INSERT INTO bot_chats(chat_id, title, last_seen_at) VALUES(?,?,?) "
+        "ON CONFLICT(chat_id) DO UPDATE SET title=?, last_seen_at=?",
+        (chat_id, "问道群", now, "问道群", now))
+    await db.execute(
+        "INSERT INTO bot_chat_members(chat_id, user_id, last_seen_at) VALUES(?,?,?) "
+        "ON CONFLICT(chat_id, user_id) DO UPDATE SET last_seen_at=?",
+        (chat_id, user_id, now, now))
+
+
 @pytest.mark.asyncio
 async def test_羁绊_schema_重复开库仍成阵(tmp_path):
     path = str(tmp_path / "bonds-schema.db")
@@ -130,6 +141,7 @@ async def test_羁绊_schema_重复开库仍成阵(tmp_path):
         bond_cols = await _列字典("social_bonds")
         milestone_cols = await _列字典("bond_milestones")
         transfer_cols = await _列字典("bond_daily_transfers")
+        title_cols = await _列字典("bond_titles")
         indexes = await _索引字典("social_bonds")
         pending_cols = await _索引列("idx_bonds_pending_expire")
         mentor_cols = await _索引列("idx_bonds_mentor_b")
@@ -146,6 +158,7 @@ async def test_羁绊_schema_重复开库仍成阵(tmp_path):
     assert set(transfer_cols) >= {
         "bond_kind", "a_id", "b_id", "active_day", "cultivation", "granted_at",
     }
+    assert set(title_cols) >= {"user_id", "title_key", "title", "threshold", "unlocked_at"}
 
     assert {"idx_bonds_mentor_b", "idx_bonds_partner_a", "idx_bonds_pending_expire",
             "idx_bonds_a", "idx_bonds_b"} <= set(indexes)
@@ -171,7 +184,14 @@ def test_羁绊常量_四十八时辰与七日法度():
     assert BONDS.MAX_ACTIVE_DISCIPLES == 3
     assert BONDS.KIND_MENTOR == "mentor"
     assert BONDS.KIND_PARTNER == "partner"
+    assert BONDS.STATUS_GRADUATED == "graduated"
     assert BONDS.DISCIPLE_SECLUSION_PCT == 0.05
+    assert BONDS.GRADUATION_ACTIVE_DAYS_REQUIRED == 8
+    assert BONDS.GRADUATION_MIN_REALM == 3
+    assert BONDS.GRADUATION_BOUND_ITEMS
+    assert BONDS.GRADUATION_MENTOR_DAOHANG > 0
+    assert BONDS.GRADUATION_DISCIPLE_DAOHANG > 0
+    assert [item[0] for item in BONDS.MENTOR_TITLE_THRESHOLDS] == [1, 3, 5]
     for realm, amount in BONDS.MENTOR_TRANSFER_CULTIVATION_BY_REALM.items():
         one_hour = settle.seclusion_gain(realm, 0, 0, 3600, root_bone=0)
         assert amount < one_hour * 0.5
@@ -708,6 +728,142 @@ async def test_每日传功_需徒弟今日活跃且每对每日一次(temp_db):
     after_second = await character.get(disciple_id)
     assert second["status"] == "ok"
     assert after_second.cultivation == after_first.cultivation + second["cultivation"]
+
+
+@pytest.mark.asyncio
+async def test_徒弟突破金丹_师父里程碑道行与播报终身一次(temp_db, monkeypatch):
+    from config import bonds as BONDS
+    from services import bonds, breakthrough
+
+    now = 1_000_000
+    mentor_id, disciple_id = 2901, 3001
+    await _激活师徒(mentor_id, disciple_id, now)
+    await _记住群(mentor_id, -10001, now)
+    last_stage = R.num_stages(1) - 1
+    cost = R.advance_cost(1, last_stage)
+    await character.set_progress(disciple_id, 1, last_stage, cost)
+    await character.add_item(disciple_id, "金丹", 1)
+    before = await character.get(mentor_id)
+    monkeypatch.setattr(breakthrough.random, "random", lambda: 0.0)
+    monkeypatch.setattr(breakthrough.random, "randint", lambda _a, _b: 1)
+
+    start = await breakthrough.try_advance(disciple_id, now=now + 10)
+    result = start
+    for offset in range(3):
+        result = await breakthrough.choose_tribulation_action(
+            disciple_id, "artifact", now=now + 11 + offset)
+
+    mentor = await character.get(mentor_id)
+    milestone = await db.fetchone(
+        "SELECT * FROM bond_milestones WHERE bond_kind=? AND a_id=? AND b_id=? AND milestone=?",
+        (BONDS.KIND_MENTOR, mentor_id, disciple_id, "jindan"))
+    broadcasts = await db.fetchall(
+        "SELECT event_type, text FROM social_broadcasts WHERE user_id=? ORDER BY id",
+        (mentor_id,))
+
+    assert start["status"] == "tribulation_choice"
+    assert result["status"] == "big_success"
+    assert result["mentor_milestone"]["status"] == "ok"
+    assert result["mentor_milestone"]["milestone"] == "jindan"
+    assert mentor.daohang == before.daohang + BONDS.MENTOR_MILESTONE_REWARDS["jindan"]["daohang"]
+    assert milestone["claimed_at"] == now + 13
+    assert any(row["event_type"] == "mentor.milestone" and "破入金丹" in row["text"]
+               for row in broadcasts)
+
+    async with db.transaction() as conn:
+        duplicate = await bonds.handle_disciple_breakthrough_conn(
+            conn, disciple_id, 2, 0, now + 20)
+    mentor_after = await character.get(mentor_id)
+    assert duplicate["status"] == "already_claimed"
+    assert mentor_after.daohang == mentor.daohang
+
+
+@pytest.mark.asyncio
+async def test_出师双条件_奖励全绑定且出师后停传承(temp_db):
+    from config import bonds as BONDS
+    from services import bonds, market
+
+    now = 1_100_000
+    mentor_id, disciple_id = 3101, 3201
+    bond_id = await _激活师徒(mentor_id, disciple_id, now)
+    await _记住群(mentor_id, -10002, now)
+
+    low_realm = await bonds.graduate_mentor_bond(bond_id, user_id=disciple_id, now=now + 10)
+    assert low_realm["status"] == "disciple_realm_low"
+
+    await character.set_progress(disciple_id, 3, 0, 0)
+    low_days = await bonds.graduate_mentor_bond(bond_id, user_id=mentor_id, now=now + 20)
+    assert low_days["status"] == "active_days_low"
+    assert low_days["need"] == BONDS.GRADUATION_ACTIVE_DAYS_REQUIRED
+
+    await db.execute(
+        "UPDATE social_bonds SET active_days=? WHERE id=?",
+        (BONDS.GRADUATION_ACTIVE_DAYS_REQUIRED, bond_id))
+    before_mentor = await character.get(mentor_id)
+    before_disciple = await character.get(disciple_id)
+    graduated = await bonds.graduate_mentor_bond(bond_id, user_id=disciple_id, now=now + 30)
+    row = await _羁绊行(bond_id)
+    after_mentor = await character.get(mentor_id)
+    after_disciple = await character.get(disciple_id)
+
+    assert graduated["status"] == "ok"
+    assert row["status"] == BONDS.STATUS_GRADUATED
+    assert after_mentor.daohang == before_mentor.daohang + BONDS.GRADUATION_MENTOR_DAOHANG
+    assert after_disciple.daohang == before_disciple.daohang + BONDS.GRADUATION_DISCIPLE_DAOHANG
+    assert await bonds.cooldown_until(mentor_id, now=now + 30) is None
+    assert await bonds.grant_daily_mentor_transfer(mentor_id, disciple_id, now=now + 40) == {
+        "status": "not_active"}
+
+    for item_key, qty in BONDS.GRADUATION_BOUND_ITEMS.items():
+        assert await character.item_qty(mentor_id, item_key, bound=1) == qty
+        assert await character.item_qty(disciple_id, item_key, bound=1) == qty
+        assert await character.item_qty(mentor_id, item_key, bound=0) == 0
+        assert await character.item_qty(disciple_id, item_key, bound=0) == 0
+        listed = await market.create_listing(disciple_id, item_key, 1, 100, now=now + 50)
+        assert listed["status"] == "no_item"
+
+    duplicate = await bonds.graduate_mentor_bond(bond_id, user_id=mentor_id, now=now + 60)
+    assert duplicate["status"] == "already_graduated"
+    broadcasts = await db.fetchall(
+        "SELECT event_type, text FROM social_broadcasts WHERE user_id=? ORDER BY id",
+        (mentor_id,))
+    assert any(row["event_type"] == "mentor.graduate" and "功成出师" in row["text"]
+               for row in broadcasts)
+    assert any(row["event_type"] == "mentor.title" and "授业真人" in row["text"]
+               for row in broadcasts)
+
+
+@pytest.mark.asyncio
+async def test_桃李称号_累计出师一三五名递进解锁(temp_db):
+    from config import bonds as BONDS
+    from services import bonds
+
+    now = 1_200_000
+    mentor_id = 3301
+    unlocked = []
+    for idx in range(1, 6):
+        disciple_id = 3400 + idx
+        bond_id = await _激活师徒(mentor_id, disciple_id, now + idx * 100)
+        await character.set_progress(disciple_id, 3, 0, 0)
+        await db.execute(
+            "UPDATE social_bonds SET active_days=? WHERE id=?",
+            (BONDS.GRADUATION_ACTIVE_DAYS_REQUIRED, bond_id))
+        res = await bonds.graduate_mentor_bond(
+            bond_id, user_id=mentor_id, now=now + idx * 100 + 50)
+        assert res["status"] == "ok"
+        unlocked.extend(title["title"] for title in res["titles"])
+
+    rows = await db.fetchall(
+        "SELECT title, threshold FROM bond_titles WHERE user_id=? ORDER BY threshold",
+        (mentor_id,))
+    graduate_rows = await db.fetchall(
+        "SELECT milestone FROM bond_milestones WHERE a_id=? AND milestone=?",
+        (mentor_id, BONDS.GRADUATION_MILESTONE))
+
+    assert unlocked == ["授业真人", "桃李盈门", "一代宗师"]
+    assert [(row["threshold"], row["title"]) for row in rows] == [
+        (1, "授业真人"), (3, "桃李盈门"), (5, "一代宗师")]
+    assert len(graduate_rows) == 5
 
 
 def test_羁绊过期任务_已挂入调度器():

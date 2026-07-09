@@ -25,6 +25,7 @@ from config.items import ITEMS
 from config.realms import (BIG_BREAKTHROUGH, advance_cost, is_big_breakthrough,
                            next_stage, realm_label, base_stats)
 from models import db
+from services import bonds as bonds_service
 from services import game_events
 from services import character as character_service
 from services import dao_path
@@ -268,10 +269,13 @@ async def try_advance(user_id: int, now: int = None) -> dict:
                     conn, user_id, "breakthrough.big_success",
                     {"target_realm": nxt[0], "target_stage": nxt[1],
                      "label": realm_label(nxt[0], nxt[1])}, now)
+                mentor_milestone = await bonds_service.handle_disciple_breakthrough_conn(
+                    conn, user_id, nxt[0], nxt[1], now)
                 return {"status": "big_success", "rate": rate, "tribulation": trib,
                         "label": realm_label(nxt[0], nxt[1]),
                         "tribulation_log": tribulation["log"],
-                        "guarantee_bonus": guarantee_bonus}
+                        "guarantee_bonus": guarantee_bonus,
+                        "mentor_milestone": mentor_milestone}
             return await _fail(
                 conn, user_id, char["cultivation"], rate, trib,
                 tribulation_log=tribulation["log"], now=now,
@@ -350,6 +354,8 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
                 conn, user_id, "breakthrough.big_success",
                 {"target_realm": row["target_realm"], "target_stage": row["target_stage"],
                  "label": label}, now)
+            mentor_milestone = await bonds_service.handle_disciple_breakthrough_conn(
+                conn, user_id, row["target_realm"], row["target_stage"], now)
             if heart_reward:
                 await game_events.emit_conn(
                     conn, user_id, HEART_SUCCESS_EVENT,
@@ -362,7 +368,8 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
                     "heart_reward": heart_reward, "daohang": daohang,
                     "buff": HEART_TRIBULATION_BUFF_NAME if heart_reward else None,
                     "buff_seconds": HEART_TRIBULATION_BUFF_DURATION if heart_reward else 0,
-                    "seclusion_pct": HEART_TRIBULATION_SECLUSION_PCT if heart_reward else 0.0}
+                    "seclusion_pct": HEART_TRIBULATION_SECLUSION_PCT if heart_reward else 0.0,
+                    "mentor_milestone": mentor_milestone}
         await conn.execute(
             "UPDATE tribulation_sessions SET hp=?, thunder_index=?, log_json=?, reward_flag=? WHERE user_id=?",
             (hp, idx + 1, json.dumps(logs, ensure_ascii=False), reward_flag, user_id))

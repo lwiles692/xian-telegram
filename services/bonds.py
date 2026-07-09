@@ -297,6 +297,110 @@ async def grant_daily_mentor_transfer(mentor_id: int, disciple_id: int,
             "bond_id": bond["id"], "active_day": day, "cultivation": amount}
 
 
+async def handle_disciple_breakthrough_conn(conn, disciple_id: int, target_realm: int,
+                                            target_stage: int, now: int = None) -> dict:
+    """徒弟突破金丹/元婴时给师父发放一次性传承里程碑奖励。"""
+    now = _now(now)
+    milestone = _milestone_for_target(target_realm)
+    if not milestone:
+        return {"status": "ignored"}
+    cur = await conn.execute(
+        "SELECT id, a_id, b_id FROM social_bonds "
+        "WHERE kind=? AND b_id=? AND status=? LIMIT 1",
+        (CFG.KIND_MENTOR, disciple_id, CFG.STATUS_ACTIVE))
+    bond = await cur.fetchone()
+    await cur.close()
+    if not bond:
+        return {"status": "no_active_bond"}
+    reward = CFG.MENTOR_MILESTONE_REWARDS[milestone]
+    try:
+        cur = await conn.execute(
+            "INSERT INTO bond_milestones(bond_kind, a_id, b_id, milestone, claimed_at) "
+            "VALUES(?,?,?,?,?)",
+            (CFG.KIND_MENTOR, bond["a_id"], bond["b_id"], milestone, now))
+    except sqlite3.IntegrityError:
+        return {"status": "already_claimed", "milestone": milestone}
+    await cur.close()
+    daohang = await _grant_daohang_conn(
+        conn, bond["a_id"], int(reward["daohang"]), "mentor_milestone", now)
+    await _emit_mentor_event_conn(
+        conn, "mentor.milestone", bond["a_id"], bond["b_id"],
+        {"milestone": milestone, "target_realm": target_realm,
+         "target_stage": target_stage, "daohang": daohang}, now)
+    return {"status": "ok", "bond_id": bond["id"], "milestone": milestone,
+            "mentor_id": bond["a_id"], "disciple_id": bond["b_id"],
+            "daohang": daohang}
+
+
+async def graduate_mentor_bond(bond_id: int, user_id: int, now: int = None) -> dict:
+    """出师：元婴初期+且活跃天数达标，双方得绑定奖励并终止 active 师徒关系。"""
+    now = _now(now)
+    from services import game_events
+
+    async with db.transaction() as conn:
+        bond = await _bond_row_conn(conn, bond_id)
+        if not bond:
+            return {"status": "not_found"}
+        if bond["kind"] != CFG.KIND_MENTOR:
+            return {"status": "bad_kind"}
+        if user_id not in (bond["a_id"], bond["b_id"]):
+            return {"status": "forbidden"}
+        if bond["status"] != CFG.STATUS_ACTIVE:
+            if await _has_milestone_conn(
+                    conn, bond["a_id"], bond["b_id"], CFG.GRADUATION_MILESTONE):
+                return {"status": "already_graduated"}
+            return {"status": "not_active", "bond_status": bond["status"]}
+        cur = await conn.execute(
+            "SELECT realm, stage FROM characters WHERE user_id=?",
+            (bond["b_id"],))
+        disciple = await cur.fetchone()
+        await cur.close()
+        if not disciple:
+            return {"status": "missing"}
+        if int(disciple["realm"]) < CFG.GRADUATION_MIN_REALM:
+            return {"status": "disciple_realm_low",
+                    "need_realm": CFG.GRADUATION_MIN_REALM}
+        active_days = int(bond["active_days"] or 0)
+        if active_days < CFG.GRADUATION_ACTIVE_DAYS_REQUIRED:
+            return {"status": "active_days_low",
+                    "need": CFG.GRADUATION_ACTIVE_DAYS_REQUIRED,
+                    "have": active_days}
+        try:
+            cur = await conn.execute(
+                "INSERT INTO bond_milestones(bond_kind, a_id, b_id, milestone, claimed_at) "
+                "VALUES(?,?,?,?,?)",
+                (CFG.KIND_MENTOR, bond["a_id"], bond["b_id"],
+                 CFG.GRADUATION_MILESTONE, now))
+        except sqlite3.IntegrityError:
+            return {"status": "already_graduated"}
+        await cur.close()
+
+        mentor_daohang = await _grant_daohang_conn(
+            conn, bond["a_id"], CFG.GRADUATION_MENTOR_DAOHANG, "mentor_graduate", now)
+        disciple_daohang = await _grant_daohang_conn(
+            conn, bond["b_id"], CFG.GRADUATION_DISCIPLE_DAOHANG, "disciple_graduate", now)
+        await _grant_bound_items_conn(conn, bond["a_id"], CFG.GRADUATION_BOUND_ITEMS)
+        await _grant_bound_items_conn(conn, bond["b_id"], CFG.GRADUATION_BOUND_ITEMS)
+        await _mark_bond_status_conn(conn, bond_id, CFG.STATUS_GRADUATED, now)
+
+        graduate_count = await _graduate_count_conn(conn, bond["a_id"])
+        titles = await _unlock_mentor_titles_conn(conn, bond["a_id"], graduate_count, now)
+        await _emit_mentor_event_conn(
+            conn, "mentor.graduate", bond["a_id"], bond["b_id"],
+            {"active_days": active_days, "graduate_count": graduate_count,
+             "mentor_daohang": mentor_daohang, "disciple_daohang": disciple_daohang}, now)
+        for title in titles:
+            await game_events.emit_conn(
+                conn, bond["a_id"], "mentor.title",
+                {"title": title["title"], "threshold": title["threshold"],
+                 "graduate_count": graduate_count}, now)
+    return {"status": "ok", "bond_id": int(bond_id),
+            "mentor_id": bond["a_id"], "disciple_id": bond["b_id"],
+            "active_days": active_days, "graduate_count": graduate_count,
+            "mentor_daohang": mentor_daohang, "disciple_daohang": disciple_daohang,
+            "items": dict(CFG.GRADUATION_BOUND_ITEMS), "titles": titles}
+
+
 async def _bond_row_conn(conn, bond_id: int):
     cur = await conn.execute("SELECT * FROM social_bonds WHERE id=?", (bond_id,))
     row = await cur.fetchone()
@@ -309,6 +413,99 @@ async def _mark_bond_status_conn(conn, bond_id: int, status: str, now: int) -> N
         "UPDATE social_bonds SET status=?, updated_at=? WHERE id=?",
         (status, now, bond_id))
     await cur.close()
+
+
+def _milestone_for_target(target_realm: int) -> str | None:
+    for milestone, reward in CFG.MENTOR_MILESTONE_REWARDS.items():
+        if int(reward["target_realm"]) == int(target_realm):
+            return milestone
+    return None
+
+
+async def _has_milestone_conn(conn, mentor_id: int, disciple_id: int, milestone: str) -> bool:
+    cur = await conn.execute(
+        "SELECT 1 FROM bond_milestones "
+        "WHERE bond_kind=? AND a_id=? AND b_id=? AND milestone=?",
+        (CFG.KIND_MENTOR, mentor_id, disciple_id, milestone))
+    row = await cur.fetchone()
+    await cur.close()
+    return bool(row)
+
+
+async def _grant_daohang_conn(conn, user_id: int, amount: int,
+                              event_type: str, now: int) -> int:
+    amount = max(0, int(amount))
+    if amount <= 0:
+        return 0
+    await conn.execute(
+        "UPDATE characters SET daohang=daohang+? WHERE user_id=?",
+        (amount, user_id))
+    await conn.execute(
+        "INSERT INTO path_events(user_id, path_key, event_type, amount, created_at) "
+        "VALUES(?,NULL,?,?,?)",
+        (user_id, event_type, amount, now))
+    return amount
+
+
+async def _grant_bound_items_conn(conn, user_id: int, items: dict[str, int]) -> None:
+    for key, qty in items.items():
+        qty = int(qty)
+        if qty <= 0:
+            continue
+        await conn.execute(
+            "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,1,?) "
+            "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty=qty+?",
+            (user_id, key, qty, qty))
+
+
+async def _graduate_count_conn(conn, mentor_id: int) -> int:
+    cur = await conn.execute(
+        "SELECT COUNT(*) AS n FROM bond_milestones "
+        "WHERE bond_kind=? AND a_id=? AND milestone=?",
+        (CFG.KIND_MENTOR, mentor_id, CFG.GRADUATION_MILESTONE))
+    row = await cur.fetchone()
+    await cur.close()
+    return int(row["n"] or 0)
+
+
+async def _unlock_mentor_titles_conn(conn, mentor_id: int, graduate_count: int,
+                                    now: int) -> list[dict]:
+    unlocked = []
+    for threshold, title in CFG.MENTOR_TITLE_THRESHOLDS:
+        if graduate_count < threshold:
+            continue
+        key = f"mentor_graduate_{threshold}"
+        try:
+            cur = await conn.execute(
+                "INSERT INTO bond_titles(user_id, title_key, title, threshold, unlocked_at) "
+                "VALUES(?,?,?,?,?)",
+                (mentor_id, key, title, threshold, now))
+        except sqlite3.IntegrityError:
+            continue
+        await cur.close()
+        unlocked.append({"title_key": key, "title": title, "threshold": threshold})
+    return unlocked
+
+
+async def _name_conn(conn, user_id: int) -> str:
+    cur = await conn.execute("SELECT username FROM users WHERE tg_user_id=?", (user_id,))
+    row = await cur.fetchone()
+    await cur.close()
+    return row["username"] if row and row["username"] else str(user_id)
+
+
+async def _emit_mentor_event_conn(conn, event_type: str, mentor_id: int,
+                                  disciple_id: int, payload: dict,
+                                  now: int) -> None:
+    from services import game_events
+
+    mentor_name = await _name_conn(conn, mentor_id)
+    disciple_name = await _name_conn(conn, disciple_id)
+    await game_events.emit_conn(
+        conn, mentor_id, event_type,
+        {**payload, "mentor_id": mentor_id, "disciple_id": disciple_id,
+         "mentor_name": mentor_name, "disciple_name": disciple_name,
+         "name": mentor_name}, now)
 
 
 async def _mentor_realm_gate_conn(conn, mentor_id: int, disciple_id: int) -> dict:

@@ -11,12 +11,14 @@ STATUS_ACTIVE = "active"
 STATUS_DISSOLVED = "dissolved"
 STATUS_DECLINED = "declined"
 STATUS_EXPIRED = "expired"
+STATUS_GRADUATED = "graduated"
 BOND_STATUSES = frozenset({
     STATUS_PENDING,
     STATUS_ACTIVE,
     STATUS_DISSOLVED,
     STATUS_DECLINED,
     STATUS_EXPIRED,
+    STATUS_GRADUATED,
 })
 
 PENDING_EXPIRE_SECONDS = 48 * 3600
@@ -37,3 +39,23 @@ MENTOR_TRANSFER_CULTIVATION_BY_REALM = {
     2: 60,
     3: 300,
 }
+
+# T3.5：出师双条件；锚定“最高活跃档到元婴初期约 8 天”，成长曲线调整时随之重算。
+GRADUATION_ACTIVE_DAYS_REQUIRED = 8
+GRADUATION_MIN_REALM = 3
+
+MENTOR_MILESTONE_REWARDS = {
+    "jindan": {"target_realm": 2, "daohang": 30},
+    "yuanying": {"target_realm": 3, "daohang": 80},
+}
+
+GRADUATION_MILESTONE = "graduate"
+GRADUATION_MENTOR_DAOHANG = 120
+GRADUATION_DISCIPLE_DAOHANG = 60
+GRADUATION_BOUND_ITEMS = {"天材地宝": 1, "妖丹": 3}
+
+MENTOR_TITLE_THRESHOLDS = (
+    (1, "授业真人"),
+    (3, "桃李盈门"),
+    (5, "一代宗师"),
+)
