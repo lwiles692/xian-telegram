@@ -39,6 +39,8 @@ HUASHEN_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
 HUASHEN_BRANCH_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
                          "mind": "归元心法", "equip": ["星河幡", "星陨袍", "幽都铃"]}
 LIANXU_HUASHEN_GEARED = HUASHEN_GEARED
+# T1.3 炼虚装备转正前，M1 先沿 M0 化神装备近似档调虚空神殿。
+LIANXU_GEARED = LIANXU_HUASHEN_GEARED
 # 元婴圆满满 buff 上界档：现役元婴装备 + 可叠满临时/福利 buff（推到 §6.3 合算上限）。
 # 红线护栏（spec §3.2）：即便如此仍不得稳定刷化神中/难 Boss。M0 阶段不含道途。
 YUANYING_FULL_BUFF = {
@@ -82,6 +84,7 @@ CONTENT_REALM = {
     "太初雾泽": 5,
     "虚空裂海": 5,
     "混沌古狱": 5,
+    "xukong": 5,
 }
 
 
@@ -568,7 +571,7 @@ def report() -> None:
     for dkey, d in DUNGEONS.items():
         r = d["realm"]
         last = R.num_stages(r) - 1
-        profile = HUASHEN_GEARED if r == 4 else GEARED
+        profile = LIANXU_GEARED if r == 5 else HUASHEN_GEARED if r == 4 else GEARED
         e = dungeon_clear_fraction(r, 0, dkey, profile=profile)
         f = dungeon_clear_fraction(r, last, dkey, profile=profile)
         print(f"  {d['name']:<10}(r{r}) 入门 {e*100:5.1f}% {_bar(e):<20} 圆满 {f*100:5.1f}%")
