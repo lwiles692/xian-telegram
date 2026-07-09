@@ -63,3 +63,7 @@ MENTOR_TITLE_THRESHOLDS = (
 # T3.6：师父周活跃回报；按徒弟本周活跃日计，小额并入溢出道行周上限。
 MENTOR_WEEKLY_DAOHANG_PER_ACTIVE_DAY = 5
 MENTOR_WEEKLY_DAOHANG_CAP_PER_DISCIPLE = 30
+
+# T3.7：徒弟完成七日引导时的师徒联动小额奖励，跟教学行为直接绑定。
+ONBOARDING_DISCIPLE_LINK_REWARD = {"stone": 40, "bound_items": {"疗伤丹": 1}}
+ONBOARDING_MENTOR_LINK_REWARD = {"stone": 40}

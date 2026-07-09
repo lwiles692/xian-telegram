@@ -1,5 +1,6 @@
-"""宗门系统（spec §11）。"""
 from __future__ import annotations
+
+"""宗门系统（spec §11）。"""
 
 import time
 
@@ -61,6 +62,9 @@ async def create(user_id: int, name: str, now: int = None) -> dict:
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
             (CREATE_STONE_COST, user_id))
+        await game_events.emit_conn(
+            conn, user_id, "sect.join",
+            {"sect": name, "role": "宗主", "amount": 1}, now)
         return {"status": "ok", "name": name}
 
 
@@ -81,6 +85,9 @@ async def join(user_id: int, name: str, now: int = None) -> dict:
             "INSERT INTO sect_members(sect_id, user_id, role, contribution, joined_at) "
             "VALUES(?,?, '弟子', 0, ?)",
             (sect_row["id"], user_id, now))
+        await game_events.emit_conn(
+            conn, user_id, "sect.join",
+            {"sect": sect_row["name"], "role": "弟子", "amount": 1}, now)
         return {"status": "ok", "name": sect_row["name"]}
 
 
