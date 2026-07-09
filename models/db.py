@@ -381,6 +381,7 @@ CREATE TABLE IF NOT EXISTS auctions (
     current_bidder INTEGER,
     end_at         INTEGER NOT NULL,
     extend_count   INTEGER NOT NULL DEFAULT 0,
+    created_at     INTEGER NOT NULL DEFAULT 0,
     status         TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS auction_bids (
@@ -396,16 +397,38 @@ CREATE TABLE IF NOT EXISTS auction_escrow (
     amount      INTEGER NOT NULL,
     PRIMARY KEY (auction_id, bidder_id)
 );
+CREATE TABLE IF NOT EXISTS auction_broadcast_state (
+    chat_id              INTEGER PRIMARY KEY,
+    last_new_notified_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS auction_closing_broadcasts (
+    chat_id     INTEGER NOT NULL,
+    auction_id  INTEGER NOT NULL,
+    notified_at INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, auction_id)
+);
+CREATE TABLE IF NOT EXISTS auction_watchers (
+    auction_id          INTEGER NOT NULL,
+    user_id             INTEGER NOT NULL,
+    created_at          INTEGER NOT NULL,
+    outbid_notified_at  INTEGER,
+    closing_notified_at INTEGER,
+    PRIMARY KEY (auction_id, user_id)
+);
 CREATE INDEX IF NOT EXISTS idx_market_listings_notify
 ON market_listings(status, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_market_trades_audit
 ON market_trades(created_at, seller_id, buyer_id);
 CREATE INDEX IF NOT EXISTS idx_auctions_status_end
 ON auctions(status, end_at);
+CREATE INDEX IF NOT EXISTS idx_auctions_status_created
+ON auctions(status, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_auctions_seller
 ON auctions(seller_id, status);
 CREATE INDEX IF NOT EXISTS idx_auction_bids_auction
 ON auction_bids(auction_id, bid_at);
+CREATE INDEX IF NOT EXISTS idx_auction_watchers_user
+ON auction_watchers(user_id, auction_id);
 """
 
 
@@ -455,6 +478,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "pvp_ratings", "week_tag", "TEXT")
     await _ensure_column(_conn, "item_instances", "enhance_level", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "item_instances", "status", "TEXT NOT NULL DEFAULT 'normal'")
+    await _ensure_column(_conn, "auctions", "created_at", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "sect_members", "donate_day", "TEXT")
     await _ensure_column(_conn, "sect_members", "donate_today", "INTEGER NOT NULL DEFAULT 0")
     # 迁移时留空(NULL)而非填默认值，使部署前的在途历练落入 _resolve 的"旧 run"兼容分支

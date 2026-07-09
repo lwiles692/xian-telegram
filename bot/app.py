@@ -1,5 +1,6 @@
-"""bot 启动：加载配置、初始化 DB、注册 Router、polling。"""
 from __future__ import annotations
+
+"""bot 启动：加载配置、初始化 DB、注册 Router、polling。"""
 
 import logging
 import os
@@ -9,7 +10,7 @@ from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 
-from handlers import (ascension, bag, boss, craft, cultivate, daily, dao_path,
+from handlers import (ascension, auction, bag, boss, craft, cultivate, daily, dao_path,
                       dungeon, explore, help as help_h, market, me, pvp,
                       rank, sect, sect_war, shop, skills, start, weekly_events)
 from handlers.common import cleanup_callback_tokens
@@ -56,6 +57,7 @@ _COMMANDS = [
     BotCommand(command="ascension", description="飞升试炼"),
     BotCommand(command="weekly", description="周活动副本"),
     BotCommand(command="market", description="玩家坊市"),
+    BotCommand(command="auction", description="拍卖行"),
     BotCommand(command="sectwar", description="宗门战据点"),
     BotCommand(command="help", description="指南"),
 ]
@@ -84,7 +86,10 @@ async def main():
     scheduler.add_job(sect_war_service.settle_season, "cron", day="last", hour=23, minute=45)
     scheduler.add_job(cleanup_callback_tokens, "interval", hours=1)
     scheduler.add_job(market_service.notify_recent_listings, "interval", hours=1, args=[bot])
+    scheduler.add_job(auction_service.notify_recent_auctions, "interval", hours=1, args=[bot])
     scheduler.add_job(activity.cleanup, "interval", hours=6)
+    scheduler.add_job(auction_service.notify_closing_auctions, "interval", minutes=1, args=[bot])
+    scheduler.add_job(auction_service.notify_closing_watchers, "interval", minutes=1)
     scheduler.add_job(auction_service.settle_due, "interval", minutes=1)
     scheduler.add_job(notifications.notify_ready_actions, "interval", minutes=1, args=[bot])
     scheduler.add_job(social.flush_broadcasts, "interval", minutes=1, args=[bot])
@@ -92,7 +97,7 @@ async def main():
     dp = Dispatcher()
     dp.update.middleware(ActivityMiddleware())
     for module in (start, me, cultivate, explore, dungeon, craft, skills, shop, bag,
-                   quest, dao_path, ascension, weekly_events, market, sect_war,
+                   quest, dao_path, ascension, weekly_events, market, auction, sect_war,
                    pvp, rank, boss, sect, daily, help_h):
         dp.include_router(module.router)
 

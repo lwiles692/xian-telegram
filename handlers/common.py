@@ -98,8 +98,9 @@ def main_menu() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="🌌 飞升", callback_data="nav:ascension")],
         [InlineKeyboardButton(text="🗓️ 活动", callback_data="nav:weekly"),
          InlineKeyboardButton(text="🏷️ 坊市", callback_data="nav:market")],
-        [InlineKeyboardButton(text="⚔️ 宗门战", callback_data="nav:sectwar"),
-         InlineKeyboardButton(text="📖 指南", callback_data="nav:help")],
+        [InlineKeyboardButton(text="🔨 拍卖", callback_data="nav:auction"),
+         InlineKeyboardButton(text="⚔️ 宗门战", callback_data="nav:sectwar")],
+        [InlineKeyboardButton(text="📖 指南", callback_data="nav:help")],
     ])
 
 

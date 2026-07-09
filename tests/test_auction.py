@@ -47,6 +47,14 @@ async def _stone_sum(*user_ids: int) -> int:
     return total
 
 
+class FakeBot:
+    def __init__(self):
+        self.sent = []
+
+    async def send_message(self, chat_id, text):
+        self.sent.append((chat_id, text))
+
+
 @pytest.mark.asyncio
 async def test_auction_schema_and_instance_status_migration_are_idempotent(tmp_path):
     path = str(tmp_path / "auction-schema.db")
@@ -56,6 +64,9 @@ async def test_auction_schema_and_instance_status_migration_are_idempotent(tmp_p
         auction_cols = await db.fetchall("PRAGMA table_info(auctions)")
         bid_cols = await db.fetchall("PRAGMA table_info(auction_bids)")
         escrow_cols = await db.fetchall("PRAGMA table_info(auction_escrow)")
+        broadcast_cols = await db.fetchall("PRAGMA table_info(auction_broadcast_state)")
+        closing_cols = await db.fetchall("PRAGMA table_info(auction_closing_broadcasts)")
+        watcher_cols = await db.fetchall("PRAGMA table_info(auction_watchers)")
         inst_cols = await db.fetchall("PRAGMA table_info(item_instances)")
         indexes = await db.fetchall("PRAGMA index_list(auctions)")
         bid_indexes = await db.fetchall("PRAGMA index_list(auction_bids)")
@@ -65,12 +76,18 @@ async def test_auction_schema_and_instance_status_migration_are_idempotent(tmp_p
     assert {row["name"] for row in auction_cols} >= {
         "id", "seller_id", "kind", "item_key", "instance_id", "qty",
         "start_price", "buyout", "current_bid", "current_bidder",
-        "end_at", "extend_count", "status",
+        "end_at", "extend_count", "created_at", "status",
     }
     assert {row["name"] for row in bid_cols} == {"id", "auction_id", "bidder_id", "amount", "bid_at"}
     assert {row["name"] for row in escrow_cols} == {"auction_id", "bidder_id", "amount"}
+    assert {row["name"] for row in broadcast_cols} == {"chat_id", "last_new_notified_at"}
+    assert {row["name"] for row in closing_cols} == {"chat_id", "auction_id", "notified_at"}
+    assert {row["name"] for row in watcher_cols} == {
+        "auction_id", "user_id", "created_at", "outbid_notified_at", "closing_notified_at",
+    }
     assert "status" in {row["name"] for row in inst_cols}
-    assert {"idx_auctions_status_end", "idx_auctions_seller"} <= {row["name"] for row in indexes}
+    assert {"idx_auctions_status_end", "idx_auctions_status_created",
+            "idx_auctions_seller"} <= {row["name"] for row in indexes}
     assert "idx_auction_bids_auction" in {row["name"] for row in bid_indexes}
 
 
@@ -95,6 +112,10 @@ def test_auction_config_matches_m2_initial_rules():
     assert AUCTION.AUCTION_TAX_RATE == 0.10
     assert AUCTION.MAX_ACTIVE_AUCTIONS_PER_SELLER == 3
     assert AUCTION.BUYOUT_MIN_MULTIPLIER == 1.20
+    assert AUCTION.AUCTION_BROADCAST_WINDOW_SECONDS == 3600
+    assert AUCTION.CLOSING_NOTICE_WINDOW_SECONDS == 3600
+    assert AUCTION.AUCTION_BROADCAST_LIMIT >= 1
+    assert AUCTION.WATCHER_NOTIFY_LIMIT >= 1
     assert AUCTION.min_buyout_price(100) == 120
     assert AUCTION.listing_fee(1) == 1
     assert AUCTION.min_next_bid(100) == 105
@@ -135,6 +156,7 @@ async def test_equipment_auction_locks_instance_and_charges_fee(temp_db):
     assert row["buyout"] == 700
     assert row["status"] == AUCTION.STATUS_ACTIVE
     assert row["end_at"] == res["end_at"]
+    assert row["created_at"] == 1000
 
     inst = await db.fetchone("SELECT status FROM item_instances WHERE id=?", (inst_id,))
     assert inst["status"] == AUCTION.INSTANCE_STATUS_AUCTION
@@ -720,10 +742,146 @@ async def test_settle_due_scans_only_due_active_auctions(temp_db):
     assert await character.item_qty(future_seller, "天外残玉", bound=0) == 0
 
 
-def test_bot_scheduler_registers_auction_settlement():
+@pytest.mark.asyncio
+async def test_auction_new_listing_broadcasts_to_known_chats(temp_db):
+    seller = 7255
+    chat_id = -725501
+    await db.execute(
+        "INSERT INTO bot_chats(chat_id, title, last_seen_at) VALUES(?,?,?)",
+        (chat_id, "拍卖群", 900))
+    await character.create(seller, "拍卖播报主")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+
+    bot = FakeBot()
+    res = await auction.notify_recent_auctions(bot, now=4600)
+    repeat = await auction.notify_recent_auctions(bot, now=4700)
+
+    assert res == {"sent": 1, "failed": 0, "skipped": 0, "auctions": 1}
+    assert repeat == {"sent": 0, "failed": 0, "skipped": 1, "auctions": 0}
+    assert len(bot.sent) == 1
+    sent_chat, text = bot.sent[0]
+    assert sent_chat == chat_id
+    assert "拍卖行上新" in text
+    assert "天外残玉×1" in text
+    assert "起拍 500灵石" in text
+    assert "拍卖播报主" in text
+    assert "/auction" in text
+
+
+@pytest.mark.asyncio
+async def test_auction_closing_broadcast_once_per_chat(temp_db):
+    seller = 7256
+    chat_id = -725601
+    await db.execute(
+        "INSERT INTO bot_chats(chat_id, title, last_seen_at) VALUES(?,?,?)",
+        (chat_id, "临拍群", 900))
+    await character.create(seller, "临拍主")
+    await character.add_item(seller, "混沌残核", 1, bound=0)
+    listed = await auction.create_material_auction(seller, "混沌残核", 1, 600, now=1000)
+
+    bot = FakeBot()
+    res = await auction.notify_closing_auctions(bot, now=listed["end_at"] - 3600)
+    repeat = await auction.notify_closing_auctions(bot, now=listed["end_at"] - 3500)
+
+    assert res == {"sent": 1, "failed": 0, "skipped": 0, "auctions": 1}
+    assert repeat == {"sent": 0, "failed": 0, "skipped": 1, "auctions": 0}
+    assert len(bot.sent) == 1
+    assert bot.sent[0][0] == chat_id
+    assert "拍卖将结" in bot.sent[0][1]
+    assert "混沌残核×1" in bot.sent[0][1]
+    rows = await db.fetchall(
+        "SELECT * FROM auction_closing_broadcasts WHERE chat_id=?",
+        (chat_id,))
+    assert len(rows) == 1
+    assert rows[0]["auction_id"] == listed["auction_id"]
+
+
+@pytest.mark.asyncio
+async def test_watch_unwatch_and_outbid_dm_queue(temp_db):
+    seller, first, second = 7257, 7258, 7259
+    await character.create(seller, "关注拍主")
+    await character.create(first, "关注客")
+    await character.create(second, "超价客")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    await character.add_stone(first, 1000)
+    await character.add_stone(second, 1000)
+    listed = await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+
+    watched = await auction.watch(first, listed["auction_id"], now=1001)
+    assert watched["status"] == "ok"
+    assert await auction.is_watching(first, listed["auction_id"]) is True
+    assert (await auction.watch(seller, listed["auction_id"], now=1001))["status"] == "self_watch"
+    assert (await auction.bid(first, listed["auction_id"], 500, now=1002))["status"] == "ok"
+    assert (await auction.bid(second, listed["auction_id"], AUCTION.min_next_bid(500), now=1003))["status"] == "ok"
+
+    rows = await db.fetchall(
+        "SELECT * FROM social_broadcasts WHERE user_id=? AND event_type=?",
+        (first, "auction.outbid"))
+    assert len(rows) == 1
+    assert "已被超价" in rows[0]["text"]
+    assert "天外残玉" in rows[0]["text"]
+
+    unwatched = await auction.unwatch(first, listed["auction_id"])
+    assert unwatched["status"] == "ok"
+    assert await auction.is_watching(first, listed["auction_id"]) is False
+    assert (await auction.unwatch(first, listed["auction_id"]))["status"] == "not_watching"
+
+
+@pytest.mark.asyncio
+async def test_closing_watcher_dm_queues_once(temp_db):
+    seller, watcher = 7260, 7261
+    await character.create(seller, "结拍拍主")
+    await character.create(watcher, "结拍关注客")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    listed = await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+    assert (await auction.watch(watcher, listed["auction_id"], now=1001))["status"] == "ok"
+
+    res = await auction.notify_closing_watchers(now=listed["end_at"] - 3600)
+    repeat = await auction.notify_closing_watchers(now=listed["end_at"] - 3500)
+
+    assert res == {"status": "ok", "queued": 1}
+    assert repeat == {"status": "ok", "queued": 0}
+    rows = await db.fetchall(
+        "SELECT * FROM social_broadcasts WHERE user_id=? AND event_type=?",
+        (watcher, "auction.closing"))
+    watcher_row = await db.fetchone(
+        "SELECT closing_notified_at FROM auction_watchers WHERE auction_id=? AND user_id=?",
+        (listed["auction_id"], watcher))
+    assert len(rows) == 1
+    assert "约 60 分钟后收槌" in rows[0]["text"]
+    assert watcher_row["closing_notified_at"] == listed["end_at"] - 3600
+
+
+@pytest.mark.asyncio
+async def test_auction_handler_lists_and_marks_watched_auctions(temp_db):
+    from handlers import auction as auction_handler
+
+    seller, watcher = 7262, 7263
+    await character.create(seller, "界面拍主")
+    await character.create(watcher, "界面关注客")
+    await character.add_item(seller, "混沌残核", 1, bound=0)
+    listed = await auction.create_material_auction(seller, "混沌残核", 1, 700, now=1000)
+
+    text, markup = await auction_handler.render_auction(watcher, now=1000)
+    watch_datas = [button.callback_data for row in markup.inline_keyboard for button in row]
+    assert "拍卖行" in text
+    assert "混沌残核" in text
+    assert any(data.startswith(f"auc:watch:{listed['auction_id']}:") for data in watch_datas)
+
+    assert (await auction.watch(watcher, listed["auction_id"], now=1001))["status"] == "ok"
+    _text, watched_markup = await auction_handler.render_auction(watcher, now=1000)
+    watched_datas = [button.callback_data for row in watched_markup.inline_keyboard for button in row]
+    assert any(data.startswith(f"auc:unwatch:{listed['auction_id']}:") for data in watched_datas)
+
+
+def test_bot_scheduler_registers_auction_notifications_and_settlement():
     from bot import app as bot_app
 
     source = inspect.getsource(bot_app.main)
 
     assert "auction_service.settle_due" in source
+    assert "auction_service.notify_recent_auctions" in source
+    assert "auction_service.notify_closing_auctions" in source
+    assert "auction_service.notify_closing_watchers" in source
     assert '"interval", minutes=1' in source

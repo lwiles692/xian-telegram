@@ -1,7 +1,8 @@
 import pytest
 import pytest_asyncio
 
-from handlers import (ascension as ascension_handler, bag as bag_handler,
+from handlers import (ascension as ascension_handler, auction as auction_handler,
+                      bag as bag_handler,
                       craft as craft_handler, cultivate as cultivate_handler,
                       dao_path as dao_path_handler, dungeon as dungeon_handler,
                       explore as explore_handler, help as help_handler,
@@ -62,6 +63,7 @@ async def test_top_level_feature_pages_do_not_embed_full_main_menu(temp_db):
         ("飞升", await ascension_handler.render_ascension(uid)),
         ("活动", await weekly_handler.render_weekly(uid)),
         ("坊市", await market_handler.render_market(uid)),
+        ("拍卖", await auction_handler.render_auction(uid)),
         ("宗门战", await sect_war_handler.render_sect_war(uid)),
     ]
 

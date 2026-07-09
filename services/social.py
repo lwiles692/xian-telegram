@@ -146,6 +146,14 @@ def _group_text(event_type: str, payload: dict) -> str:
 def _dm_text(event_type: str, payload: dict) -> str:
     if event_type == "pvp.rating_notice":
         return str(payload.get("text") or "")
+    if event_type == "auction.outbid":
+        return (
+            f"🔨 你关注的拍卖 #{payload.get('auction_id')}「{payload.get('item', '拍品')}」"
+            f"已被超价：{payload.get('old_bid')} → {payload.get('new_bid')} 灵石。")
+    if event_type == "auction.closing":
+        return (
+            f"⏳ 你关注的拍卖 #{payload.get('auction_id')}「{payload.get('item', '拍品')}」"
+            f"约 {payload.get('minutes')} 分钟后收槌，当前 {payload.get('price')} 灵石。")
     return ""
 
 
