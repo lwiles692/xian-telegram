@@ -307,6 +307,7 @@ CREATE TABLE IF NOT EXISTS social_bonds (
     kind            TEXT NOT NULL,
     a_id            INTEGER NOT NULL,
     b_id            INTEGER NOT NULL,
+    initiator_id    INTEGER,
     status          TEXT NOT NULL,
     active_days     INTEGER NOT NULL DEFAULT 0,
     last_active_day TEXT,
@@ -523,6 +524,7 @@ async def init_db(path: str = None):
         "ON auctions(status, settled_at, seller_id, current_bidder)")
     await _ensure_column(_conn, "social_bonds", "expires_at", "INTEGER")
     await _ensure_column(_conn, "social_bonds", "activated_at", "INTEGER")
+    await _ensure_column(_conn, "social_bonds", "initiator_id", "INTEGER")
     await _ensure_column(_conn, "social_bonds", "confirmed_at", "INTEGER")
     await _ensure_column(_conn, "social_bonds", "dissolved_at", "INTEGER")
     await _ensure_column(_conn, "social_bonds", "active_days", "INTEGER NOT NULL DEFAULT 0")
