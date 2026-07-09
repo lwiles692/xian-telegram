@@ -182,6 +182,7 @@ async def test_本命实例不可上拍不可分解_斩缚后仍绑定(temp_db):
     unbound = await natal.unbind(uid, now=30_020)
     listed_after = await auction.create_equipment_auction(uid, inst_id, 1_000, now=30_030)
     decomposed_after = await equipment.decompose(uid, inst_id)
+    rebound = await natal.bind(uid, inst_id, now=30_040)
     inst = await db.fetchone(
         "SELECT bound, natal_level FROM item_instances WHERE id=?",
         (inst_id,))
@@ -192,4 +193,21 @@ async def test_本命实例不可上拍不可分解_斩缚后仍绑定(temp_db):
     assert dict(inst) == {"bound": 1, "natal_level": 0}
     assert listed_after["status"] == "bound"
     assert decomposed_after["status"] == "natal_bound"
+    assert rebound["status"] == "natal_bound"
     assert (await character.get(uid)).natal_instance_id is None
+
+
+@pytest.mark.asyncio
+async def test_坏档仅角色指针指向本命也不可上拍分解(temp_db):
+    uid = 9151
+    await _备好角色(uid, realm=3)
+    inst_id = await _实例(uid, "天魔刃")
+    await db.execute(
+        "UPDATE characters SET natal_instance_id=? WHERE user_id=?",
+        (inst_id, uid))
+
+    listed = await auction.create_equipment_auction(uid, inst_id, 1_000, now=40_000)
+    decomposed = await equipment.decompose(uid, inst_id)
+
+    assert listed["status"] == "bound"
+    assert decomposed["status"] == "natal_bound"

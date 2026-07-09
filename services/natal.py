@@ -34,6 +34,8 @@ async def bind(user_id: int, instance_id: int, now: int = None) -> dict:
             return {"status": "not_equipment"}
         if inst["tier"] not in CFG.ELIGIBLE_TIERS:
             return {"status": "tier_low", "tier": inst["tier"]}
+        if int(inst["bound"] or 0) or int(inst["natal_level"] or 0):
+            return {"status": "natal_bound"}
         cost = CFG.bind_cost(inst["tier"])
         paid = await _charge_conn(conn, user_id, cost)
         if paid["status"] != "ok":
@@ -52,16 +54,19 @@ async def bind(user_id: int, instance_id: int, now: int = None) -> dict:
             "item": item_name(inst["base_key"]), "cost": cost}
 
 
-async def feed(user_id: int, now: int = None) -> dict:
+async def feed(user_id: int, instance_id: int | None = None, now: int = None) -> dict:
     """喂养当前本命法宝，提升一级；器修只降成本，不提高属性上限。"""
     now = _now(now)
     async with db.transaction() as conn:
+        requested_id = instance_id
         char = await _character_conn(conn, user_id)
         if not char:
             return {"status": "missing"}
         instance_id = char["natal_instance_id"]
         if not instance_id:
             return {"status": "no_natal"}
+        if requested_id is not None and int(requested_id) != int(char["natal_instance_id"]):
+            return {"status": "not_active"}
         lookup = await character.item_instance_for_action_conn(conn, user_id, int(instance_id))
         if lookup["status"] != "ok":
             return {"status": lookup["status"]}
@@ -88,16 +93,19 @@ async def feed(user_id: int, now: int = None) -> dict:
             "item": item_name(inst["base_key"]), "cost": cost, "forge_discount": forge_path}
 
 
-async def unbind(user_id: int, now: int = None) -> dict:
+async def unbind(user_id: int, instance_id: int | None = None, now: int = None) -> dict:
     """斩缚：高额灵石清空本命等级，保留绑定，给换本命留出口。"""
     now = _now(now)
     async with db.transaction() as conn:
+        requested_id = instance_id
         char = await _character_conn(conn, user_id)
         if not char:
             return {"status": "missing"}
         instance_id = char["natal_instance_id"]
         if not instance_id:
             return {"status": "no_natal"}
+        if requested_id is not None and int(requested_id) != int(char["natal_instance_id"]):
+            return {"status": "not_active"}
         lookup = await character.item_instance_for_action_conn(conn, user_id, int(instance_id))
         if lookup["status"] != "ok":
             return {"status": lookup["status"]}

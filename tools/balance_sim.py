@@ -18,6 +18,7 @@ from config import auction as AUCTION
 from config import buffs as BUFFS
 from config import daohang as DAOHANG_CFG
 from config import dao_paths as DAO
+from config import natal as NATAL
 from config.ascension import PASSIVE_CAP, PASSIVES
 from config.bosses import WORLD_BOSSES
 from config.dungeons import DUNGEONS
@@ -521,6 +522,61 @@ def lianxu_daily_loop_profile() -> dict:
     }
 
 
+NATAL_LIANXU_SINK_MATERIALS = ("雾泽虚砂", "裂海空髓", "混沌残核")
+
+
+def _add_cost_items(total: dict[str, int], items: dict) -> None:
+    for key, qty in items.items():
+        total[key] = total.get(key, 0) + int(qty)
+
+
+def _material_sources(key: str) -> list[str]:
+    sources = []
+    for map_key, cfg in MAPS.items():
+        if _drop_weight(cfg["drops"], key) > 0:
+            sources.append(map_key)
+    for dungeon_key, cfg in DUNGEONS.items():
+        if _drop_weight(cfg["drops"], key) > 0:
+            sources.append(cfg["name"])
+    for boss_key, cfg in WORLD_BOSSES.items():
+        if key in cfg["drops"]:
+            sources.append(cfg["name"])
+    return sources
+
+
+def natal_feed_sink_profile() -> dict:
+    """M5 本命喂养 sink：显式核算 2-10 级材料消耗与炼虚材料来源覆盖。"""
+    levels = tuple(range(2, NATAL.MAX_LEVEL + 1))
+    standard_items: dict[str, int] = {}
+    forge_items: dict[str, int] = {}
+    standard_stone = 0
+    forge_stone = 0
+    per_level = {}
+    for level in levels:
+        cost = NATAL.feed_cost(level)
+        forge_cost = NATAL.feed_cost(level, forge_path=True)
+        standard_stone += int(cost["stone"])
+        forge_stone += int(forge_cost["stone"])
+        _add_cost_items(standard_items, cost["items"])
+        _add_cost_items(forge_items, forge_cost["items"])
+        per_level[level] = {"cost": cost, "forge_cost": forge_cost}
+    sources = {key: _material_sources(key) for key in NATAL_LIANXU_SINK_MATERIALS}
+    lianxu_items = {key: standard_items.get(key, 0) for key in NATAL_LIANXU_SINK_MATERIALS}
+    return {
+        "levels": levels,
+        "per_level": per_level,
+        "standard_stone": standard_stone,
+        "forge_stone": forge_stone,
+        "standard_items": standard_items,
+        "forge_items": forge_items,
+        "lianxu_items": lianxu_items,
+        "sources": sources,
+        "all_lianxu_sources_available": all(sources[key] for key in NATAL_LIANXU_SINK_MATERIALS),
+        "forge_stone_discount": standard_stone - forge_stone,
+        "forge_qihun_discount": standard_items.get("器魂", 0) - forge_items.get("器魂", 0),
+    }
+
+
 def activity_daohang_profile() -> dict:
     """活动道行(M4)限流：周上限封顶防肝度失控(spec T4.1)。
 
@@ -741,6 +797,16 @@ def report() -> None:
     print(f"  T1.5日常闭环 精力{daily['daily_stamina']}/{daily['stamina_cap']}"
           f" 可重复最高{daily['max_repeatable_value']:5.1f}/{daily['value_cap']:5.1f}"
           f" Boss折算{daily['boss_value']:5.1f}")
+    natal_sink = natal_feed_sink_profile()
+    lianxu_sink = "、".join(
+        f"{key}×{qty}" for key, qty in natal_sink["lianxu_items"].items() if qty)
+    print("-" * 78)
+    print("M5 本命法宝喂养 sink: 2-10级材料消耗与炼虚来源覆盖")
+    print(f"  标准喂养 灵石{natal_sink['standard_stone']} 器魂{natal_sink['standard_items'].get('器魂', 0)}"
+          f" 炼虚材料 {lianxu_sink}")
+    print(f"  器修降耗 灵石-{natal_sink['forge_stone_discount']}"
+          f" 器魂-{natal_sink['forge_qihun_discount']}"
+          f" 来源覆盖{'✅' if natal_sink['all_lianxu_sources_available'] else '⚠️'}")
     print("=" * 78)
     print("世界 Boss 单次伤害 & 击杀所需挑战次数(满配)")
     for bkey, cfg in WORLD_BOSSES.items():

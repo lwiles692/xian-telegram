@@ -22,7 +22,9 @@ async def _get_instance(conn, user_id: int, instance_id: int):
 
 async def _char_row(conn, user_id: int):
     cur = await conn.execute(
-        "SELECT root_bone, forge_prof, spirit_stone FROM characters WHERE user_id=?", (user_id,))
+        "SELECT root_bone, forge_prof, spirit_stone, natal_instance_id "
+        "FROM characters WHERE user_id=?",
+        (user_id,))
     row = await cur.fetchone()
     await cur.close()
     return row
@@ -128,7 +130,9 @@ async def decompose(user_id: int, instance_id: int) -> dict:
         inst = lookup["instance"]
         if inst["equipped_slot"]:
             return {"status": "equipped"}
-        if int(inst["bound"] or 0) or int(inst["natal_level"] or 0):
+        char = await _char_row(conn, user_id)
+        natal_id = int(char["natal_instance_id"] or 0) if char else 0
+        if int(inst["bound"] or 0) or int(inst["natal_level"] or 0) or natal_id == int(instance_id):
             return {"status": "natal_bound"}
         qihun = decompose_yield(inst["tier"], inst["enhance_level"])
         await conn.execute(

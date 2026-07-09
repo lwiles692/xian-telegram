@@ -41,6 +41,15 @@ async def _active_count(conn, seller_id: int) -> int:
     return int(row["n"] or 0)
 
 
+async def _natal_instance_id(conn, user_id: int) -> int:
+    cur = await conn.execute(
+        "SELECT natal_instance_id FROM characters WHERE user_id=?",
+        (user_id,))
+    row = await cur.fetchone()
+    await cur.close()
+    return int(row["natal_instance_id"] or 0) if row else 0
+
+
 async def _listing_fee_quote(conn, seller_id: int, start_price: int) -> dict:
     fee = CFG.listing_fee(start_price)
     cur = await conn.execute(
@@ -190,7 +199,8 @@ async def create_equipment_auction(seller_id: int, instance_id: int, start_price
             return {"status": "not_equipment"}
         if inst["equipped_slot"]:
             return {"status": "equipped"}
-        if int(inst["bound"] or 0) or int(inst["natal_level"] or 0):
+        if (int(inst["bound"] or 0) or int(inst["natal_level"] or 0)
+                or await _natal_instance_id(conn, seller_id) == int(instance_id)):
             return {"status": "bound"}
         floor = CFG.floor_price_for_tier(inst["tier"])
         if err := _validate_start_price(start_price, floor):

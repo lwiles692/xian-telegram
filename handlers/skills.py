@@ -9,12 +9,13 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from config import auction as auction_cfg
 from config.equipment import QIHUN_KEY
 from config.items import ITEMS, equipment_slot, format_bonus, item_name
+from config import natal as NATAL
 from config.skills import MIND_SLOT, skill_name
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
                              button_grid, consume_action_callback,
                              guard_private_callback, guard_private_message,
                              section_back_markup, show)
-from services import character, equipment
+from services import character, equipment, natal as natal_service
 
 router = Router()
 
@@ -26,6 +27,14 @@ SKILL_CATEGORIES = {
 
 def _bonus_text(inst: dict) -> str:
     return format_bonus(character.enhanced_equipment_bonus(inst))
+
+
+def _cost_text(cost: dict) -> str:
+    parts = []
+    if cost.get("stone"):
+        parts.append(f"灵石 {cost['stone']}")
+    parts.extend(f"{item_name(key)}×{qty}" for key, qty in cost.get("items", {}).items())
+    return "、".join(parts) if parts else "无"
 
 
 def _learnable_pages(inv: list[tuple[str, int]]) -> list[tuple[str, int, dict]]:
@@ -85,9 +94,17 @@ async def render_skills_category(user_id: int, cat: str):
         qihun = 0
     if cat == "equipment" and instances:
         lines.append(f"器魂 ×{qihun}，可用于强化/重铸。")
+        natal_id = int(char.natal_instance_id or 0)
         for inst in instances:
             locked = inst.get("status") == auction_cfg.INSTANCE_STATUS_AUCTION
-            mark = "拍卖托管" if locked else ("已装备" if inst["equipped_slot"] else "未装备")
+            if locked:
+                mark = "拍卖托管"
+            elif int(inst.get("natal_level") or 0) > 0:
+                mark = f"本命Lv.{inst['natal_level']}"
+            elif int(inst.get("bound") or 0):
+                mark = "已斩缚绑定"
+            else:
+                mark = "已装备" if inst["equipped_slot"] else "未装备"
             lvl = inst.get("enhance_level", 0)
             lvl_txt = f"+{lvl} " if lvl else ""
             lines.append(
@@ -114,6 +131,25 @@ async def render_skills_category(user_id: int, cat: str):
                         text=f"卸下#{inst['id']}",
                         callback_data=await action_callback_data(user_id, f"eq:unequip:{inst['id']}")))
                 rows.append(ops)
+                natal_ops = []
+                if int(inst.get("natal_level") or 0) > 0 and int(inst["id"]) == natal_id:
+                    if int(inst["natal_level"]) < NATAL.MAX_LEVEL:
+                        natal_ops.append(InlineKeyboardButton(
+                            text=f"喂养#{inst['id']}",
+                            callback_data=await action_callback_data(
+                                user_id, f"natal:feed:{inst['id']}")))
+                    natal_ops.append(InlineKeyboardButton(
+                        text=f"斩缚#{inst['id']}",
+                        callback_data=await action_callback_data(
+                            user_id, f"natal:unbind:{inst['id']}")))
+                elif not natal_id and inst["tier"] in NATAL.ELIGIBLE_TIERS:
+                    if not int(inst.get("bound") or 0) and not int(inst.get("natal_level") or 0):
+                        natal_ops.append(InlineKeyboardButton(
+                            text=f"认主#{inst['id']}",
+                            callback_data=await action_callback_data(
+                                user_id, f"natal:bind:{inst['id']}")))
+                if natal_ops:
+                    rows.append(natal_ops)
     elif cat == "pages":
         page_buttons = []
         for key, qty, item in _learnable_pages(inv):
@@ -207,6 +243,42 @@ def _eq_text(res: dict) -> str:
     return "炼制未成。"
 
 
+def _natal_text(res: dict) -> str:
+    s = res["status"]
+    action = res.get("action")
+    if s == "ok" and action == "bind":
+        return f"{res['item']} 已祭为本命法宝（Lv.{res['level']}），耗 {_cost_text(res['cost'])}。"
+    if s == "ok" and action == "feed":
+        return f"{res['item']} 本命喂养至 Lv.{res['level']}，耗 {_cost_text(res['cost'])}。"
+    if s == "ok" and action == "unbind":
+        return f"已斩去 {res['item']} 的本命牵系，耗灵石 {res['cost']['stone']}。"
+    if s == "realm_low":
+        return "元婴期起方可祭炼本命法宝。"
+    if s == "tier_low":
+        return "仅宝阶、玄阶法宝可认主。"
+    if s == "already_has_natal":
+        return "已有本命法宝，需先斩缚。"
+    if s == "natal_bound":
+        return "此法宝已留本命旧痕，不可再祭。"
+    if s == "no_natal":
+        return "尚无本命法宝。"
+    if s == "not_active":
+        return "此物已非当前本命法宝，请刷新法宝页。"
+    if s == "max":
+        return f"本命法宝已至满级（Lv.{res['level']}）。"
+    if s == "no_stone":
+        return f"灵石不足（需 {res['need']}，余 {res['have']}）。"
+    if s == "no_material":
+        return f"{res['item']} 不足（需 {res['need']}，余 {res['have']}）。"
+    if s == "locked":
+        return "此法宝正寄于拍卖行，暂不可祭炼本命。"
+    if s == "not_equipment":
+        return "此物不可祭为本命法宝。"
+    if s == "not_found":
+        return "未寻得此法宝。"
+    return "本命法宝事务未成。"
+
+
 async def _eq_op(callback: CallbackQuery, prefix: str, fn):
     if await guard_private_callback(callback):
         return
@@ -215,6 +287,32 @@ async def _eq_op(callback: CallbackQuery, prefix: str, fn):
         return
     res = await fn(callback.from_user.id, int(action.rsplit(":", 1)[1]))
     await show(callback, _eq_text(res), section_back_markup("↩️ 返回功法", "nav:skills"))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("natal:"))
+async def cb_natal_action(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("natal:"):
+        return
+    parts = action.split(":")
+    op = parts[1] if len(parts) > 1 else ""
+    try:
+        instance_id = int(parts[2]) if len(parts) == 3 else None
+        if op == "bind" and instance_id is not None:
+            res = await natal_service.bind(callback.from_user.id, instance_id)
+        elif op == "feed" and instance_id is not None:
+            res = await natal_service.feed(callback.from_user.id, instance_id)
+        elif op == "unbind" and instance_id is not None:
+            res = await natal_service.unbind(callback.from_user.id, instance_id)
+        else:
+            res = {"status": "bad_request"}
+    except ValueError:
+        res = {"status": "bad_request"}
+    res = {**res, "action": op}
+    await show(callback, _natal_text(res), section_back_markup("↩️ 返回法宝", "skills:cat:equipment"))
     await callback.answer()
 
 

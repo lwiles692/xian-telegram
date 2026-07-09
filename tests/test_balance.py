@@ -492,6 +492,23 @@ def test_lianxu_daily_loop_stamina_and_market_value_are_self_consistent():
     assert profile["max_daily_value"] < profile["value_cap"]
 
 
+def test_natal_feed_sink_covers_lianxu_materials_and_forge_discount():
+    """spec-v3 M5 DoD：本命喂养显式消耗炼虚材料，并只给器修降耗不提上限。"""
+    profile = B.natal_feed_sink_profile()
+
+    assert profile["levels"] == tuple(range(2, B.NATAL.MAX_LEVEL + 1))
+    assert profile["standard_stone"] == 252_000
+    assert profile["forge_stone"] == 226_800
+    assert profile["standard_items"]["器魂"] == 70
+    assert profile["forge_items"]["器魂"] == 61
+    assert profile["forge_stone_discount"] == 25_200
+    assert profile["forge_qihun_discount"] == 9
+    assert profile["lianxu_items"] == {"雾泽虚砂": 3, "裂海空髓": 3, "混沌残核": 3}
+    assert profile["all_lianxu_sources_available"] is True
+    for key in B.NATAL_LIANXU_SINK_MATERIALS:
+        assert profile["sources"][key], key
+
+
 def test_dungeon_value_subtracts_entry_and_keeps_drops_unscaled():
     """秘境反套利口径：扣入场费；drops 不受 reward_factor 放大（复刻 _resolve 仅 stone/cult 放大）。"""
     xuanming = B.DUNGEONS["xuanming"]
