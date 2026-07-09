@@ -156,6 +156,66 @@ async def test_结契确认消耗绑定同心结并播报_一人一侣由服务�
 
 
 @pytest.mark.asyncio
+async def test_结契镜像缺失时回滚不扣同心结不半激活(temp_db, monkeypatch):
+    from config import bonds as BONDS
+    from services import bonds
+
+    now = 35_000
+    await _备好境界(5351, "并蒂5351", 2)
+    await _备好境界(5352, "连枝5352", 2)
+    await character.add_item(5351, BONDS.PARTNER_TOKEN_ITEM, 1, bound=1)
+    pending = await bonds.create_pending_partner_request(
+        5351, 5352, initiator_id=5351, now=now)
+    mirror = await _道侣行(5352, 5351)
+    assert mirror is not None
+    await db.execute("DELETE FROM social_bonds WHERE id=?", (mirror["id"],))
+
+    async def _读到旧镜像(conn, bond):
+        return mirror
+
+    monkeypatch.setattr(bonds, "_partner_mirror_row_conn", _读到旧镜像)
+
+    with pytest.raises(RuntimeError, match="道侣镜像双行异常"):
+        await bonds.confirm_pending_partner_request(
+            pending["bond_id"], confirmer_id=5352, now=now + 10)
+
+    assert await character.item_qty(5351, BONDS.PARTNER_TOKEN_ITEM, bound=1) == 1
+    row = await _道侣行(5351, 5352)
+    assert row["status"] == BONDS.STATUS_PENDING
+    assert row["activated_at"] is None
+    assert row["confirmed_at"] is None
+    assert await _道侣行(5352, 5351) is None
+
+
+@pytest.mark.asyncio
+async def test_结契扣同心结异常失败时回滚不半激活(temp_db, monkeypatch):
+    from config import bonds as BONDS
+    from services import bonds
+
+    now = 36_000
+    await _备好境界(5361, "青鸾5361", 2)
+    await _备好境界(5362, "玄鹤5362", 2)
+    await character.add_item(5361, BONDS.PARTNER_TOKEN_ITEM, 1, bound=1)
+    pending = await bonds.create_pending_partner_request(
+        5361, 5362, initiator_id=5361, now=now)
+
+    async def _扣物失败(conn, user_id, key, qty, bound=None):
+        return False
+
+    monkeypatch.setattr(character, "consume_item_conn", _扣物失败)
+
+    with pytest.raises(RuntimeError, match="同心结扣除异常"):
+        await bonds.confirm_pending_partner_request(
+            pending["bond_id"], confirmer_id=5362, now=now + 10)
+
+    assert await character.item_qty(5361, BONDS.PARTNER_TOKEN_ITEM, bound=1) == 1
+    rows = await _道侣双行(5361, 5362)
+    assert {row["status"] for row in rows} == {BONDS.STATUS_PENDING}
+    assert {row["activated_at"] for row in rows} == {None}
+    assert {row["confirmed_at"] for row in rows} == {None}
+
+
+@pytest.mark.asyncio
 async def test_拒绝结契不落冷却_解除扣灵石并同步镜像双行(temp_db):
     from config import bonds as BONDS
     from services import bonds

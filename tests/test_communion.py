@@ -91,6 +91,30 @@ async def test_共修邀请超过十分钟确认会作废(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_共修发邀前会作废过期邀请并允许重邀(temp_db):
+    mentor_id, disciple_id = 4113, 4114
+    await _active_mentor_bond(mentor_id, disciple_id)
+
+    first = await communion.invite(
+        BONDS.KIND_MENTOR, mentor_id, disciple_id, now=3100)
+    second = await communion.invite(
+        BONDS.KIND_MENTOR, mentor_id, disciple_id,
+        now=3100 + communion.INVITE_TTL_SECONDS + 1)
+    rows = await db.fetchall(
+        "SELECT id, status FROM communion_sessions ORDER BY id",
+        ())
+
+    assert first["status"] == "ok"
+    assert second["status"] == "ok"
+    assert [row["status"] for row in rows] == [
+        communion.STATUS_EXPIRED,
+        communion.STATUS_PENDING,
+    ]
+    assert rows[0]["id"] == first["session_id"]
+    assert rows[1]["id"] == second["session_id"]
+
+
+@pytest.mark.asyncio
 async def test_共修每人每周跨关系只可开始一次(temp_db):
     mentor_id, disciple_id, partner_id = 4121, 4122, 4123
     await _active_mentor_bond(mentor_id, disciple_id)

@@ -1071,13 +1071,14 @@ async def test_周活跃回报_三名满勤徒弟仍远低于周上限(temp_db):
     assert expected < settle.OVERFLOW_DAOHANG_WEEKLY_CAP
 
 
-def test_羁绊过期任务_已挂入调度器():
+def test_羁绊与共修过期任务_已挂入调度器():
     from bot import app as bot_app
 
     source = inspect.getsource(bot_app.main)
 
     assert "bonds_service.expire_pending" in source
     assert '"interval", hours=1' in source
+    assert 'scheduler.add_job(communion_service.expire_pending, "interval", minutes=1)' in source
 
 
 def test_师父周活跃回报_已挂入周日错峰调度器():

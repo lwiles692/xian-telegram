@@ -16,7 +16,8 @@ from handlers import (ascension, auction, bag, bonds, boss, craft, cultivate, da
 from handlers.common import cleanup_callback_tokens
 from models import db
 from handlers import quest
-from services import (activity, bonds as bonds_service, character, notifications,
+from services import (activity, bonds as bonds_service, character, communion as communion_service,
+                      notifications,
                       season, social, world_boss)
 from services import auction as auction_service
 from services import market as market_service
@@ -96,6 +97,7 @@ async def main():
     scheduler.add_job(sect_war_service.settle_season, "cron", day="last", hour=23, minute=45)
     scheduler.add_job(cleanup_callback_tokens, "interval", hours=1)
     scheduler.add_job(bonds_service.expire_pending, "interval", hours=1)
+    scheduler.add_job(communion_service.expire_pending, "interval", minutes=1)
     scheduler.add_job(market_service.notify_recent_listings, "interval", hours=1, args=[bot])
     scheduler.add_job(auction_service.notify_recent_auctions, "interval", hours=1, args=[bot])
     scheduler.add_job(activity.cleanup, "interval", hours=6)

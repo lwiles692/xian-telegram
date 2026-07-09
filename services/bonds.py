@@ -430,15 +430,15 @@ async def confirm_pending_partner_request(bond_id: int, confirmer_id: int,
         token_owner = await _partner_token_owner_conn(conn, bond, confirmer_id)
         if token_owner is None:
             return {"status": "no_token", "item": CFG.PARTNER_TOKEN_ITEM}
-        consumed = await character_service.consume_item_conn(
-            conn, token_owner, CFG.PARTNER_TOKEN_ITEM, 1, bound=1)
-        if not consumed:
-            return {"status": "no_token", "item": CFG.PARTNER_TOKEN_ITEM}
 
         changed = await _mark_partner_pair_status_conn(
             conn, bond, CFG.STATUS_ACTIVE, now, activated=True)
         if changed != 2:
-            return {"status": "mirror_missing", "changed": changed}
+            raise RuntimeError("道侣镜像双行异常，结契已回滚")
+        consumed = await character_service.consume_item_conn(
+            conn, token_owner, CFG.PARTNER_TOKEN_ITEM, 1, bound=1)
+        if not consumed:
+            raise RuntimeError("同心结扣除异常，结契已回滚")
         await _emit_partner_event_conn(
             conn, "partner.active", bond["a_id"], bond["b_id"], {}, now)
     return {"status": "ok", "bond_id": int(bond_id), "mirror_bond_id": int(mirror["id"]),

@@ -56,6 +56,7 @@ async def invite(kind: str, initiator_id: int, target_id: int, now: int = None) 
             conn, (bond["a_id"], bond["b_id"]), now, now + DURATION_SECONDS)
         if ready["status"] != "ok":
             return ready
+        await _expire_pending_conn(conn, now)
         open_session = await _open_session_for_users_conn(conn, bond["a_id"], bond["b_id"])
         if open_session:
             return {"status": "has_open_session", "session_id": open_session["id"],
@@ -130,12 +131,7 @@ async def expire_pending(now: int = None) -> dict:
     """批量作废超时未确认的共修邀请。"""
     now = _now(now)
     async with db.transaction() as conn:
-        cur = await conn.execute(
-            "UPDATE communion_sessions SET status=?, updated_at=? "
-            "WHERE status=? AND expires_at<?",
-            (STATUS_EXPIRED, now, STATUS_PENDING, now))
-        expired = int(cur.rowcount or 0)
-        await cur.close()
+        expired = await _expire_pending_conn(conn, now)
     return {"status": "ok", "expired": expired}
 
 
@@ -242,6 +238,16 @@ async def _open_session_for_users_conn(conn, a_id: int, b_id: int):
     row = await cur.fetchone()
     await cur.close()
     return row
+
+
+async def _expire_pending_conn(conn, now: int) -> int:
+    cur = await conn.execute(
+        "UPDATE communion_sessions SET status=?, updated_at=? "
+        "WHERE status=? AND expires_at<?",
+        (STATUS_EXPIRED, now, STATUS_PENDING, now))
+    expired = int(cur.rowcount or 0)
+    await cur.close()
+    return expired
 
 
 async def _weekly_used_conn(conn, user_ids: tuple[int, int], week: str):
