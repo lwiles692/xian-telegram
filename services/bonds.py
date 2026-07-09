@@ -75,6 +75,78 @@ async def can_start_mentor_request(mentor_id: int, disciple_id: int,
         return await _can_start_mentor_request_conn(conn, mentor_id, disciple_id, now)
 
 
+async def preview_mentor_request(mentor_id: int, disciple_id: int,
+                                 initiator_id: int, now: int = None) -> dict:
+    """拜师/收徒发帖前预览：handler 用于确认页，不直接写入。"""
+    now = _now(now)
+    if initiator_id not in (mentor_id, disciple_id):
+        return {"status": "forbidden"}
+    async with db.transaction() as conn:
+        check = await _can_start_mentor_request_conn(conn, mentor_id, disciple_id, now)
+        mentor_name = await _name_conn(conn, mentor_id)
+        disciple_name = await _name_conn(conn, disciple_id)
+    return {**check, "mentor_id": mentor_id, "disciple_id": disciple_id,
+            "initiator_id": initiator_id, "mentor_name": mentor_name,
+            "disciple_name": disciple_name}
+
+
+async def mentor_overview(user_id: int, now: int = None) -> dict:
+    """师徒界面概览：active 师父/徒弟、待确认帖、称号与冷却。"""
+    now = _now(now)
+    async with db.transaction() as conn:
+        cur = await conn.execute("SELECT 1 FROM characters WHERE user_id=?", (user_id,))
+        char = await cur.fetchone()
+        await cur.close()
+        if not char:
+            return {"status": "missing"}
+        cur = await conn.execute(
+            "SELECT b.*, ua.username AS mentor_name, ub.username AS disciple_name "
+            "FROM social_bonds b "
+            "LEFT JOIN users ua ON ua.tg_user_id=b.a_id "
+            "LEFT JOIN users ub ON ub.tg_user_id=b.b_id "
+            "WHERE b.kind=? AND (b.a_id=? OR b.b_id=?) "
+            "AND b.status IN (?,?) "
+            "AND (b.status<>? OR b.expires_at IS NULL OR b.expires_at>?) "
+            "ORDER BY b.updated_at DESC, b.id DESC",
+            (CFG.KIND_MENTOR, user_id, user_id, CFG.STATUS_ACTIVE, CFG.STATUS_PENDING,
+             CFG.STATUS_PENDING, now))
+        rows = await cur.fetchall()
+        await cur.close()
+        cur = await conn.execute(
+            "SELECT title, threshold FROM bond_titles WHERE user_id=? ORDER BY threshold",
+            (user_id,))
+        titles = await cur.fetchall()
+        await cur.close()
+        cooldown = await _cooldown_until_conn(conn, user_id, now)
+
+    active_mentor = None
+    active_disciples = []
+    pending_incoming = []
+    pending_outgoing = []
+    for row in rows:
+        item = _bond_payload(row)
+        if row["status"] == CFG.STATUS_ACTIVE:
+            if row["b_id"] == user_id:
+                active_mentor = item
+            elif row["a_id"] == user_id:
+                active_disciples.append(item)
+            continue
+        if row["initiator_id"] == user_id:
+            pending_outgoing.append(item)
+        else:
+            pending_incoming.append(item)
+    return {
+        "status": "ok",
+        "user_id": user_id,
+        "active_mentor": active_mentor,
+        "active_disciples": active_disciples,
+        "pending_incoming": pending_incoming,
+        "pending_outgoing": pending_outgoing,
+        "titles": [dict(row) for row in titles],
+        "cooldown_until": cooldown,
+    }
+
+
 async def _can_start_mentor_request_conn(conn, mentor_id: int, disciple_id: int,
                                          now: int) -> dict:
     if mentor_id == disciple_id:
@@ -167,6 +239,8 @@ async def confirm_pending_mentor_request(bond_id: int, confirmer_id: int,
         await cur.close()
         if not changed:
             return {"status": "not_pending", "bond_status": CFG.STATUS_ACTIVE}
+        await _emit_mentor_event_conn(
+            conn, "mentor.active", bond["a_id"], bond["b_id"], {}, now)
     return {"status": "ok", "bond_id": int(bond_id),
             "mentor_id": bond["a_id"], "disciple_id": bond["b_id"]}
 
@@ -477,6 +551,25 @@ async def _bond_row_conn(conn, bond_id: int):
     row = await cur.fetchone()
     await cur.close()
     return row
+
+
+def _bond_payload(row) -> dict:
+    return {
+        "bond_id": row["id"],
+        "kind": row["kind"],
+        "mentor_id": row["a_id"],
+        "disciple_id": row["b_id"],
+        "mentor_name": row["mentor_name"] or str(row["a_id"]),
+        "disciple_name": row["disciple_name"] or str(row["b_id"]),
+        "initiator_id": row["initiator_id"],
+        "status": row["status"],
+        "active_days": int(row["active_days"] or 0),
+        "last_active_day": row["last_active_day"],
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
+        "activated_at": row["activated_at"],
+        "updated_at": row["updated_at"],
+    }
 
 
 async def _mark_bond_status_conn(conn, bond_id: int, status: str, now: int) -> None:

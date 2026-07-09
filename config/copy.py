@@ -26,6 +26,8 @@ HELP = (
     "/rank — 天梯排行\n"
     "/boss — 群内世界 Boss\n"
     "/daily — 每日签到\n"
+    "/quest — 悬赏与七日引导\n"
+    "/master — 师徒传承\n"
     "/bag — 查看储物袋\n"
     "/help — 重览此卷\n\n"
     "大道三千，愿道友早证长生。"

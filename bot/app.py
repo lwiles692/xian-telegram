@@ -10,7 +10,7 @@ from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 
-from handlers import (ascension, auction, bag, boss, craft, cultivate, daily, dao_path,
+from handlers import (ascension, auction, bag, bonds, boss, craft, cultivate, daily, dao_path,
                       dungeon, explore, help as help_h, market, me, pvp,
                       rank, sect, sect_war, shop, skills, start, weekly_events)
 from handlers.common import cleanup_callback_tokens
@@ -53,6 +53,7 @@ _COMMANDS = [
     BotCommand(command="sect", description="宗门"),
     BotCommand(command="daily", description="每日签到"),
     BotCommand(command="quest", description="悬赏任务"),
+    BotCommand(command="master", description="师徒"),
     BotCommand(command="bag", description="储物袋"),
     BotCommand(command="path", description="道途 / 转修"),
     BotCommand(command="ascension", description="飞升试炼"),
@@ -106,7 +107,7 @@ async def main():
     dp = Dispatcher()
     dp.update.middleware(ActivityMiddleware())
     for module in (start, me, cultivate, explore, dungeon, craft, skills, shop, bag,
-                   quest, dao_path, ascension, weekly_events, market, auction, sect_war,
+                   quest, bonds, dao_path, ascension, weekly_events, market, auction, sect_war,
                    pvp, rank, boss, sect, daily, help_h):
         dp.include_router(module.router)
 
