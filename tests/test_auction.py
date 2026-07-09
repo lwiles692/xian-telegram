@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 import pytest_asyncio
 
@@ -35,6 +37,13 @@ async def _create_auction_locked_instance(user_id: int) -> tuple[int, dict]:
     listed = await auction.create_equipment_auction(user_id, inst_id, 500, now=1000)
     assert listed["status"] == "ok"
     return inst_id, listed
+
+
+async def _stone_sum(*user_ids: int) -> int:
+    total = 0
+    for user_id in user_ids:
+        total += (await character.get(user_id)).spirit_stone
+    return total
 
 
 @pytest.mark.asyncio
@@ -378,3 +387,213 @@ async def test_cancel_rejects_non_owner_and_auctions_with_bid(temp_db):
     assert await character.item_qty(seller, "天外残玉", bound=0) == 0
     row = await db.fetchone("SELECT status FROM auctions WHERE id=?", (listed["auction_id"],))
     assert row["status"] == AUCTION.STATUS_ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_bid_deducts_stone_into_escrow_and_blocks_cancel(temp_db):
+    seller, bidder = 7230, 7231
+    await character.create(seller, "拍主")
+    await character.create(bidder, "竞价客")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    await character.add_stone(bidder, 1000)
+    listed = await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+    before_bidder = (await character.get(bidder)).spirit_stone
+
+    res = await auction.bid(bidder, listed["auction_id"], 500, now=1001)
+
+    assert res["status"] == "ok"
+    assert res["bid"] == 500
+    assert res["min_next_bid"] == AUCTION.min_next_bid(500)
+    assert (await character.get(bidder)).spirit_stone == before_bidder - 500
+    escrow = await db.fetchall("SELECT * FROM auction_escrow WHERE auction_id=?", (listed["auction_id"],))
+    bids = await db.fetchall("SELECT * FROM auction_bids WHERE auction_id=?", (listed["auction_id"],))
+    row = await auction.get_auction(listed["auction_id"])
+    assert [dict(r) for r in escrow] == [{
+        "auction_id": listed["auction_id"], "bidder_id": bidder, "amount": 500,
+    }]
+    assert len(bids) == 1
+    assert bids[0]["bidder_id"] == bidder
+    assert bids[0]["amount"] == 500
+    assert row["current_bid"] == 500
+    assert row["current_bidder"] == bidder
+    assert (await auction.cancel(seller, listed["auction_id"], now=1002))["status"] == "has_bid"
+
+
+@pytest.mark.asyncio
+async def test_outbid_refunds_previous_bidder_and_replaces_escrow(temp_db):
+    seller, first, second = 7232, 7233, 7234
+    await character.create(seller, "拍主二")
+    await character.create(first, "先出价")
+    await character.create(second, "后出价")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    await character.add_stone(first, 1000)
+    await character.add_stone(second, 1000)
+    listed = await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+    first_before = (await character.get(first)).spirit_stone
+    second_before = (await character.get(second)).spirit_stone
+
+    assert (await auction.bid(first, listed["auction_id"], 500, now=1001))["status"] == "ok"
+    res = await auction.bid(second, listed["auction_id"], AUCTION.min_next_bid(500), now=1002)
+
+    assert res["status"] == "ok"
+    assert (await character.get(first)).spirit_stone == first_before
+    assert (await character.get(second)).spirit_stone == second_before - AUCTION.min_next_bid(500)
+    escrow = await db.fetchall("SELECT * FROM auction_escrow WHERE auction_id=?", (listed["auction_id"],))
+    bids = await db.fetchall("SELECT * FROM auction_bids WHERE auction_id=? ORDER BY id", (listed["auction_id"],))
+    assert [dict(r) for r in escrow] == [{
+        "auction_id": listed["auction_id"], "bidder_id": second,
+        "amount": AUCTION.min_next_bid(500),
+    }]
+    assert [(row["bidder_id"], row["amount"]) for row in bids] == [
+        (first, 500), (second, AUCTION.min_next_bid(500)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_bids_leave_single_highest_escrow(temp_db):
+    seller, first, second = 7244, 7245, 7246
+    await character.create(seller, "并拍主")
+    await character.create(first, "并拍一")
+    await character.create(second, "并拍二")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    await character.add_stone(first, 1000)
+    await character.add_stone(second, 1000)
+    listed = await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+    first_before = (await character.get(first)).spirit_stone
+    second_before = (await character.get(second)).spirit_stone
+
+    results = await asyncio.gather(
+        auction.bid(first, listed["auction_id"], 500, now=1001),
+        auction.bid(second, listed["auction_id"], AUCTION.min_next_bid(500), now=1001),
+    )
+
+    assert any(res["status"] == "ok" for res in results)
+    row = await auction.get_auction(listed["auction_id"])
+    escrow = await db.fetchall("SELECT * FROM auction_escrow WHERE auction_id=?", (listed["auction_id"],))
+    assert row["current_bid"] == AUCTION.min_next_bid(500)
+    assert row["current_bidder"] == second
+    assert [dict(r) for r in escrow] == [{
+        "auction_id": listed["auction_id"], "bidder_id": second,
+        "amount": AUCTION.min_next_bid(500),
+    }]
+    assert (await character.get(first)).spirit_stone == first_before
+    assert (await character.get(second)).spirit_stone == second_before - AUCTION.min_next_bid(500)
+
+
+@pytest.mark.asyncio
+async def test_bid_rejects_self_low_poor_and_expired_attempts(temp_db):
+    seller, bidder = 7235, 7236
+    await character.create(seller, "拍主三")
+    await character.create(bidder, "穷客")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    listed = await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+
+    assert (await auction.bid(seller, listed["auction_id"], 500, now=1001))["status"] == "self_bid"
+    low = await auction.bid(bidder, listed["auction_id"], 499, now=1001)
+    poor = await auction.bid(bidder, listed["auction_id"], 500, now=1001)
+    expired = await auction.bid(bidder, listed["auction_id"], 500,
+                                now=1000 + AUCTION.AUCTION_DURATION_SECONDS)
+
+    assert low == {"status": "bid_too_low", "min_bid": 500}
+    assert poor["status"] == "no_stone"
+    assert poor["need"] == 500
+    assert expired["status"] == "not_available"
+
+
+@pytest.mark.asyncio
+async def test_sniping_extends_end_time_at_most_six_times(temp_db):
+    seller, bidder = 7237, 7238
+    await character.create(seller, "狙拍主")
+    await character.create(bidder, "压线客")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    await character.add_stone(bidder, 20_000)
+    listed = await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+    await db.execute(
+        "UPDATE auctions SET end_at=? WHERE id=?",
+        (2000, listed["auction_id"]))
+
+    amount = 500
+    end_at = 2000
+    for idx in range(AUCTION.SNIPE_MAX_EXTENSIONS + 1):
+        amount = amount if idx == 0 else AUCTION.min_next_bid(amount)
+        res = await auction.bid(bidder, listed["auction_id"], amount, now=end_at - 1)
+        if idx < AUCTION.SNIPE_MAX_EXTENSIONS:
+            assert res["extended"] is True
+            end_at += AUCTION.SNIPE_EXTEND_SECONDS
+        else:
+            assert res["extended"] is False
+        assert res["end_at"] == end_at
+
+    row = await auction.get_auction(listed["auction_id"])
+    assert row["extend_count"] == AUCTION.SNIPE_MAX_EXTENSIONS
+    assert row["end_at"] == 2000 + AUCTION.SNIPE_EXTEND_SECONDS * AUCTION.SNIPE_MAX_EXTENSIONS
+
+
+@pytest.mark.asyncio
+async def test_buyout_sells_material_immediately_without_overcharging_or_extending(temp_db):
+    seller, buyer = 7239, 7240
+    await character.create(seller, "一口价主")
+    await character.create(buyer, "一口价客")
+    await character.add_item(seller, "混沌残核", 2, bound=0)
+    await character.add_stone(buyer, 1000)
+    total_before = await _stone_sum(seller, buyer)
+    listed = await auction.create_material_auction(seller, "混沌残核", 2, 500, buyout=700, now=1000)
+    await db.execute(
+        "UPDATE auctions SET end_at=? WHERE id=?",
+        (1300, listed["auction_id"]))
+
+    res = await auction.bid(buyer, listed["auction_id"], 900, now=1299)
+
+    assert res["status"] == "ok"
+    assert res["sold"] is True
+    assert res["buyout"] is True
+    assert res["paid"] == 700
+    assert res["price"] == 700
+    assert res["tax"] == 70
+    assert res["seller_gain"] == 630
+    assert await character.item_qty(buyer, "混沌残核", bound=0) == 2
+    assert (await character.get(buyer)).spirit_stone == 400
+    assert await _stone_sum(seller, buyer) == total_before - listed["fee"] - res["tax"]
+    row = await auction.get_auction(listed["auction_id"])
+    escrow = await db.fetchall("SELECT * FROM auction_escrow WHERE auction_id=?", (listed["auction_id"],))
+    bids = await db.fetchall("SELECT * FROM auction_bids WHERE auction_id=?", (listed["auction_id"],))
+    assert row["status"] == AUCTION.STATUS_SOLD
+    assert row["current_bid"] == 700
+    assert row["current_bidder"] == buyer
+    assert row["end_at"] == 1300
+    assert escrow == []
+    assert len(bids) == 1
+    assert bids[0]["amount"] == 700
+
+
+@pytest.mark.asyncio
+async def test_buyout_refunds_previous_bidder_and_transfers_equipment(temp_db):
+    seller, first, buyer = 7241, 7242, 7243
+    await character.create(seller, "卖剑主")
+    await character.create(first, "先拍剑")
+    await character.create(buyer, "买剑客")
+    await character.add_stone(seller, 1000)
+    await character.add_stone(first, 1000)
+    await character.add_stone(buyer, 1000)
+    inst_id = await _create_instance(seller, "玄铁剑")
+    total_before = await _stone_sum(seller, first, buyer)
+    listed = await auction.create_equipment_auction(seller, inst_id, 500, buyout=700, now=1000)
+    first_before = (await character.get(first)).spirit_stone
+
+    assert (await auction.bid(first, listed["auction_id"], 500, now=1001))["status"] == "ok"
+    res = await auction.bid(buyer, listed["auction_id"], 1000, now=1002)
+
+    assert res["status"] == "ok"
+    assert res["sold"] is True
+    assert res["price"] == 700
+    assert (await character.get(first)).spirit_stone == first_before
+    assert (await character.get(buyer)).spirit_stone == 400
+    assert await _stone_sum(seller, first, buyer) == total_before - listed["fee"] - res["tax"]
+    inst = await db.fetchone("SELECT user_id, status, equipped_slot FROM item_instances WHERE id=?", (inst_id,))
+    escrow = await db.fetchall("SELECT * FROM auction_escrow WHERE auction_id=?", (listed["auction_id"],))
+    row = await auction.get_auction(listed["auction_id"])
+    assert inst["user_id"] == buyer
+    assert inst["status"] == AUCTION.INSTANCE_STATUS_NORMAL
+    assert inst["equipped_slot"] is None
+    assert row["status"] == AUCTION.STATUS_SOLD
+    assert escrow == []
