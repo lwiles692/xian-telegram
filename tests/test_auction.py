@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 
 import pytest
 import pytest_asyncio
@@ -597,3 +598,132 @@ async def test_buyout_refunds_previous_bidder_and_transfers_equipment(temp_db):
     assert inst["equipped_slot"] is None
     assert row["status"] == AUCTION.STATUS_SOLD
     assert escrow == []
+
+
+@pytest.mark.asyncio
+async def test_settle_passed_material_returns_inventory_and_is_idempotent(temp_db):
+    seller = 7247
+    await character.create(seller, "流拍主")
+    await character.add_item(seller, "天外残玉", 2, bound=0)
+    before_stone = (await character.get(seller)).spirit_stone
+    listed = await auction.create_material_auction(seller, "天外残玉", 2, 500, now=1000)
+    assert await character.item_qty(seller, "天外残玉", bound=0) == 0
+    after_listing_stone = (await character.get(seller)).spirit_stone
+
+    early = await auction.settle(listed["auction_id"], now=listed["end_at"] - 1)
+    res = await auction.settle(listed["auction_id"], now=listed["end_at"])
+    repeat = await auction.settle(listed["auction_id"], now=listed["end_at"] + 1)
+
+    assert early["status"] == "not_due"
+    assert res["status"] == "ok"
+    assert res["result"] == AUCTION.STATUS_PASSED
+    assert repeat["status"] == "noop"
+    assert repeat["final_status"] == AUCTION.STATUS_PASSED
+    assert await character.item_qty(seller, "天外残玉", bound=0) == 2
+    assert (await character.get(seller)).spirit_stone == after_listing_stone
+    assert (await character.get(seller)).spirit_stone == before_stone - listed["fee"]
+    row = await auction.get_auction(listed["auction_id"])
+    assert row["status"] == AUCTION.STATUS_PASSED
+
+
+@pytest.mark.asyncio
+async def test_settle_passed_equipment_restores_instance(temp_db):
+    seller = 7248
+    await character.create(seller, "流拍剑主")
+    inst_id = await _create_instance(seller, "玄铁剑")
+    listed = await auction.create_equipment_auction(seller, inst_id, 500, now=1000)
+
+    res = await auction.settle(listed["auction_id"], now=listed["end_at"])
+
+    assert res["status"] == "ok"
+    assert res["result"] == AUCTION.STATUS_PASSED
+    inst = await db.fetchone("SELECT user_id, status FROM item_instances WHERE id=?", (inst_id,))
+    row = await auction.get_auction(listed["auction_id"])
+    assert inst["user_id"] == seller
+    assert inst["status"] == AUCTION.INSTANCE_STATUS_NORMAL
+    assert row["status"] == AUCTION.STATUS_PASSED
+
+
+@pytest.mark.asyncio
+async def test_settle_sold_material_uses_escrow_and_preserves_stone_sinks(temp_db):
+    seller, buyer = 7249, 7250
+    await character.create(seller, "成交主")
+    await character.create(buyer, "成交客")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    await character.add_stone(buyer, 1000)
+    total_before = await _stone_sum(seller, buyer)
+    listed = await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+    assert (await auction.bid(buyer, listed["auction_id"], 500, now=1001))["status"] == "ok"
+
+    res = await auction.settle(listed["auction_id"], now=listed["end_at"])
+    after_once = await _stone_sum(seller, buyer)
+    repeat = await auction.settle(listed["auction_id"], now=listed["end_at"] + 1)
+
+    assert res["status"] == "ok"
+    assert res["result"] == AUCTION.STATUS_SOLD
+    assert res["tax"] == 50
+    assert res["seller_gain"] == 450
+    assert repeat["status"] == "noop"
+    assert await character.item_qty(buyer, "天外残玉", bound=0) == 1
+    assert await _stone_sum(seller, buyer) == after_once
+    assert after_once == total_before - listed["fee"] - res["tax"]
+    escrow = await db.fetchall("SELECT * FROM auction_escrow WHERE auction_id=?", (listed["auction_id"],))
+    row = await auction.get_auction(listed["auction_id"])
+    assert escrow == []
+    assert row["status"] == AUCTION.STATUS_SOLD
+
+
+@pytest.mark.asyncio
+async def test_settle_sold_equipment_transfers_owner_and_is_idempotent(temp_db):
+    seller, buyer = 7251, 7252
+    await character.create(seller, "成交剑主")
+    await character.create(buyer, "成交剑客")
+    await character.add_stone(buyer, 1000)
+    inst_id = await _create_instance(seller, "玄铁剑")
+    total_before = await _stone_sum(seller, buyer)
+    listed = await auction.create_equipment_auction(seller, inst_id, 500, now=1000)
+    assert (await auction.bid(buyer, listed["auction_id"], 500, now=1001))["status"] == "ok"
+
+    res = await auction.settle(listed["auction_id"], now=listed["end_at"])
+    after_once = await _stone_sum(seller, buyer)
+    repeat = await auction.settle(listed["auction_id"], now=listed["end_at"] + 1)
+
+    assert res["status"] == "ok"
+    assert res["result"] == AUCTION.STATUS_SOLD
+    assert repeat["status"] == "noop"
+    assert await _stone_sum(seller, buyer) == after_once
+    assert after_once == total_before - listed["fee"] - res["tax"]
+    inst = await db.fetchone("SELECT user_id, status, equipped_slot FROM item_instances WHERE id=?", (inst_id,))
+    assert inst["user_id"] == buyer
+    assert inst["status"] == AUCTION.INSTANCE_STATUS_NORMAL
+    assert inst["equipped_slot"] is None
+
+
+@pytest.mark.asyncio
+async def test_settle_due_scans_only_due_active_auctions(temp_db):
+    due_seller, future_seller = 7253, 7254
+    await character.create(due_seller, "到期主")
+    await character.create(future_seller, "未到期主")
+    await character.add_item(due_seller, "天外残玉", 1, bound=0)
+    await character.add_item(future_seller, "天外残玉", 1, bound=0)
+    due = await auction.create_material_auction(due_seller, "天外残玉", 1, 500, now=1000)
+    future = await auction.create_material_auction(future_seller, "天外残玉", 1, 500, now=2000)
+
+    res = await auction.settle_due(now=due["end_at"], limit=10)
+
+    assert res["status"] == "ok"
+    assert res["checked"] == 1
+    assert res["settled"] == 1
+    assert (await auction.get_auction(due["auction_id"]))["status"] == AUCTION.STATUS_PASSED
+    assert (await auction.get_auction(future["auction_id"]))["status"] == AUCTION.STATUS_ACTIVE
+    assert await character.item_qty(due_seller, "天外残玉", bound=0) == 1
+    assert await character.item_qty(future_seller, "天外残玉", bound=0) == 0
+
+
+def test_bot_scheduler_registers_auction_settlement():
+    from bot import app as bot_app
+
+    source = inspect.getsource(bot_app.main)
+
+    assert "auction_service.settle_due" in source
+    assert '"interval", minutes=1' in source

@@ -16,6 +16,7 @@ from handlers.common import cleanup_callback_tokens
 from models import db
 from handlers import quest
 from services import activity, character, notifications, season, social, world_boss
+from services import auction as auction_service
 from services import market as market_service
 from services import pvp as pvp_service
 from services import sect_war as sect_war_service
@@ -84,6 +85,7 @@ async def main():
     scheduler.add_job(cleanup_callback_tokens, "interval", hours=1)
     scheduler.add_job(market_service.notify_recent_listings, "interval", hours=1, args=[bot])
     scheduler.add_job(activity.cleanup, "interval", hours=6)
+    scheduler.add_job(auction_service.settle_due, "interval", minutes=1)
     scheduler.add_job(notifications.notify_ready_actions, "interval", minutes=1, args=[bot])
     scheduler.add_job(social.flush_broadcasts, "interval", minutes=1, args=[bot])
     scheduler.start()

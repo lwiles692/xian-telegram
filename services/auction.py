@@ -114,11 +114,42 @@ async def _clear_escrow(conn, auction_id: int, bidder_id: int | None = None) -> 
             (auction_id, bidder_id))
 
 
+async def _escrow_amount(conn, auction_id: int, bidder_id: int) -> int:
+    cur = await conn.execute(
+        "SELECT amount FROM auction_escrow WHERE auction_id=? AND bidder_id=?",
+        (auction_id, bidder_id))
+    row = await cur.fetchone()
+    await cur.close()
+    return int(row["amount"]) if row else 0
+
+
+async def _refund_all_escrow(conn, auction_id: int) -> int:
+    cur = await conn.execute("SELECT bidder_id, amount FROM auction_escrow WHERE auction_id=?", (auction_id,))
+    rows = await cur.fetchall()
+    await cur.close()
+    total = 0
+    for row in rows:
+        amount = int(row["amount"])
+        await _refund_stone(conn, row["bidder_id"], amount)
+        total += amount
+    await _clear_escrow(conn, auction_id)
+    return total
+
+
 async def _add_item(conn, user_id: int, item_key: str, qty: int) -> None:
     await conn.execute(
         "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
         "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty=qty+?",
         (user_id, item_key, int(qty), int(qty)))
+
+
+async def _return_lot(conn, auction) -> None:
+    if auction["kind"] == CFG.KIND_EQUIPMENT:
+        await conn.execute(
+            "UPDATE item_instances SET status=? WHERE id=? AND user_id=?",
+            (CFG.INSTANCE_STATUS_NORMAL, auction["instance_id"], auction["seller_id"]))
+    else:
+        await _add_item(conn, auction["seller_id"], auction["item_key"], auction["qty"])
 
 
 async def _insert_auction(conn, seller_id: int, kind: str, start_price: int, buyout: int | None,
@@ -266,9 +297,14 @@ def _maybe_extend_end_at(auction, now: int) -> tuple[int, int, bool]:
     return end_at, extend_count, False
 
 
-async def _complete_sale(conn, auction, buyer_id: int, price: int, now: int) -> dict:
+async def _complete_sale(conn, auction, buyer_id: int, price: int, now: int,
+                         require_escrow: bool = False) -> dict:
     tax = int(price * CFG.AUCTION_TAX_RATE)
     seller_gain = price - tax
+    if require_escrow:
+        escrow = await _escrow_amount(conn, auction["id"], buyer_id)
+        if escrow < price:
+            return {"status": "bad_escrow", "need": price, "have": escrow}
     cur = await conn.execute(
         "UPDATE auctions SET current_bid=?, current_bidder=?, status=? "
         "WHERE id=? AND status=?",
@@ -363,6 +399,54 @@ async def bid(bidder_id: int, auction_id: int, amount: int, now: int = None) -> 
                 "bidder_id": bidder_id, "min_next_bid": CFG.min_next_bid(amount),
                 "end_at": new_end_at, "extended": extended,
                 "extend_count": extend_count}
+
+
+async def settle(auction_id: int, now: int = None) -> dict:
+    """结算单场到期拍卖；重复调用只返回 no-op，不重复发货发钱。"""
+    now = _now(now)
+    async with db.transaction() as conn:
+        cur = await conn.execute("SELECT * FROM auctions WHERE id=?", (auction_id,))
+        auction = await cur.fetchone()
+        await cur.close()
+        if not auction:
+            return {"status": "not_found"}
+        if auction["status"] != CFG.STATUS_ACTIVE:
+            return {"status": "noop", "auction_id": auction_id, "final_status": auction["status"]}
+        if int(auction["end_at"]) > now:
+            return {"status": "not_due", "auction_id": auction_id, "end_at": int(auction["end_at"])}
+
+        if auction["current_bidder"] is None or auction["current_bid"] is None:
+            cur = await conn.execute(
+                "UPDATE auctions SET status=? WHERE id=? AND status=?",
+                (CFG.STATUS_PASSED, auction_id, CFG.STATUS_ACTIVE))
+            changed = cur.rowcount
+            await cur.close()
+            if not changed:
+                return {"status": "noop", "auction_id": auction_id, "final_status": CFG.STATUS_PASSED}
+            await _return_lot(conn, auction)
+            refunded = await _refund_all_escrow(conn, auction_id)
+            return {"status": "ok", "result": CFG.STATUS_PASSED, "auction_id": auction_id,
+                    "kind": auction["kind"], "item": item_name(auction["item_key"]),
+                    "qty": auction["qty"], "refunded": refunded}
+
+        sold = await _complete_sale(
+            conn, auction, auction["current_bidder"], int(auction["current_bid"]),
+            now, require_escrow=True)
+        return sold if sold["status"] != "ok" else {**sold, "result": CFG.STATUS_SOLD}
+
+
+async def settle_due(now: int = None, limit: int = 20) -> dict:
+    """扫描并结算到期 active 拍卖，供 APScheduler 每分钟调用。"""
+    now = _now(now)
+    rows = await db.fetchall(
+        "SELECT id FROM auctions WHERE status=? AND end_at<=? ORDER BY end_at, id LIMIT ?",
+        (CFG.STATUS_ACTIVE, now, int(limit)))
+    results = []
+    for row in rows:
+        results.append(await settle(row["id"], now=now))
+    return {"status": "ok", "checked": len(rows),
+            "settled": sum(1 for r in results if r.get("status") == "ok"),
+            "results": results}
 
 
 async def get_auction(auction_id: int) -> dict | None:
