@@ -165,7 +165,8 @@ async def try_advance(user_id: int, now: int = None) -> dict:
                      "label": realm_label(nxt[0], nxt[1])}, now)
                 return {"status": "big_success", "rate": rate, "tribulation": trib,
                         "label": realm_label(nxt[0], nxt[1]),
-                        "tribulation_log": tribulation["log"]}
+                        "tribulation_log": tribulation["log"],
+                        "pill_used": pill}
             return await _fail(
                 conn, user_id, char["cultivation"], rate, trib,
                 tribulation_log=tribulation["log"], now=now)
@@ -226,7 +227,8 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
                 {"target_realm": row["target_realm"], "target_stage": row["target_stage"],
                  "label": label}, now)
             return {"status": "big_success", "rate": row["rate"], "tribulation": True,
-                    "label": label, "tribulation_log": logs}
+                    "label": label, "tribulation_log": logs,
+                    "pill_used": BIG_BREAKTHROUGH[row["target_realm"]]["pill"]}
         await conn.execute(
             "UPDATE tribulation_sessions SET hp=?, thunder_index=?, log_json=? WHERE user_id=?",
             (hp, idx + 1, json.dumps(logs, ensure_ascii=False), user_id))
