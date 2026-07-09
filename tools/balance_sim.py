@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """平衡 / 经济模拟器（issues #13-#16 的共同地基）。
 
 纯函数,基于 ``services.combat.simulate``,不碰 DB。玩家属性按
@@ -8,7 +10,6 @@
 
     python -m tools.balance_sim
 """
-from __future__ import annotations
 
 import random
 
@@ -255,6 +256,115 @@ def seclusion_efficiency(profile=GEARED) -> float:
     return 1.0 + min(BUFFS.SECLUSION_PCT_CAP, max(0.0, raw))
 
 
+def effective_map_cult_per_stamina(realm: int, stage: int, map_key: str,
+                                   profile=GEARED, n: int = 120) -> float:
+    """按连战成功率折算的修为/精力，用于近二值战斗的过渡收益口径。"""
+    m = MAPS[map_key]
+    return m["cult"] / m["stamina"] * map_run_winrate(realm, stage, map_key, profile=profile, n=n)
+
+
+def _seclusion_daily_gain(cost: int, root_bone: int, hours_per_day: float, realm: int = 5) -> float:
+    return cost * hours_per_day * (1 + max(0, root_bone) / 200) / R.SECLUSION_STAGE_HOURS[realm]
+
+
+def lianxu_progression_days(root_bone: int, seclusion_hours_per_day: float,
+                            daily_stamina: int, stage_maps: tuple[str, str, str],
+                            profile=LIANXU_HUASHEN_GEARED, n: int = 120) -> dict:
+    """炼虚初期→圆满的天数估算：三段推进到圆满，闭关 + 每日炼虚图修为。"""
+    stages = []
+    total = 0.0
+    for stage, map_key in enumerate(stage_maps):
+        cost = R.advance_cost(5, stage)
+        seclusion = _seclusion_daily_gain(cost, root_bone, seclusion_hours_per_day, realm=5)
+        m = MAPS[map_key]
+        runrate = map_run_winrate(5, stage, map_key, profile=profile, n=n)
+        map_gain = daily_stamina / m["stamina"] * m["cult"] * runrate
+        daily_gain = seclusion + map_gain
+        days = cost / daily_gain
+        stages.append({
+            "stage": stage,
+            "map": map_key,
+            "runrate": runrate,
+            "daily_gain": daily_gain,
+            "days": days,
+        })
+        total += days
+    return {"total_days": total, "stages": stages}
+
+
+def lianxu_progression_profile() -> dict:
+    """spec-v3 T0.11 推进时长：普通活跃 6~9 周，高活跃不低于 4 周。"""
+    ordinary = lianxu_progression_days(
+        root_bone=60,
+        seclusion_hours_per_day=18,
+        daily_stamina=160,
+        stage_maps=("太初雾泽", "太初雾泽", "太初雾泽"),
+        n=120,
+    )
+    high = lianxu_progression_days(
+        root_bone=70,
+        seclusion_hours_per_day=22,
+        daily_stamina=280,
+        stage_maps=("太初雾泽", "虚空裂海", "混沌古狱"),
+        n=120,
+    )
+    return {"ordinary": ordinary, "high": high}
+
+
+def _drop_weight(drops, key: str) -> float:
+    return next((float(weight) for item, weight, *_ in drops if item == key), 0.0)
+
+
+def expected_lianxu_breakthrough_attempts() -> float:
+    """45% 基础率 + 每败 10% 保底，95% 封顶下的期望消耗丹数。"""
+    base = R.BIG_BREAKTHROUGH[5]["base_rate"]
+    fail_prob = 1.0
+    expected = 0.0
+    for streak in range(20):
+        expected += fail_prob
+        rate = min(0.95, base + streak * 0.10)
+        fail_prob *= (1 - rate)
+        if fail_prob < 1e-9:
+            break
+    return expected
+
+
+def lianxu_first_breakthrough_profile() -> dict:
+    """首枚炼虚丹与进入炼虚的期望周期，来源限定为化神可及内容。"""
+    tianwai = MAPS["天外古墟"]["drops"]
+    taixu = DUNGEONS["taixu"]["drops"]
+    daily_tianwai_runs = 1
+    daily_taixu_runs = 2
+    boss_frontline_scrap_per_day = 0.04
+    direct_pill_per_day = daily_tianwai_runs * _drop_weight(tianwai, "炼虚丹") / 100
+    scrap_per_day = (
+        daily_tianwai_runs * _drop_weight(tianwai, "炼虚丹残方") / 100
+        + daily_taixu_runs * _drop_weight(taixu, "炼虚丹残方") / 100
+        + boss_frontline_scrap_per_day
+    )
+    pill_equiv_per_day = direct_pill_per_day + scrap_per_day / 4
+    first_pill_days = 1 / pill_equiv_per_day
+    expected_attempts = expected_lianxu_breakthrough_attempts()
+    sources = [
+        {"kind": "map", "key": "天外古墟", "realm": MAPS["天外古墟"]["realm"]},
+        {"kind": "dungeon", "key": "taixu", "realm": DUNGEONS["taixu"]["realm"]},
+        {"kind": "world_boss", "key": "huashen", "realm": WORLD_BOSSES["huashen"]["realm"]},
+    ]
+    return {
+        "daily_tianwai_runs": daily_tianwai_runs,
+        "daily_taixu_runs": daily_taixu_runs,
+        "boss_frontline_scrap_per_day": boss_frontline_scrap_per_day,
+        "direct_pill_per_day": direct_pill_per_day,
+        "scrap_per_day": scrap_per_day,
+        "pill_equiv_per_day": pill_equiv_per_day,
+        "first_pill_days": first_pill_days,
+        "expected_attempts": expected_attempts,
+        "entry_days": first_pill_days * expected_attempts,
+        "sources": sources,
+        "huashen_accessible": all(src["realm"] <= 4 for src in sources),
+    }
+
+
 # ---- 经济:套利 ----
 
 def map_stone_per_stamina(map_key: str) -> float:
@@ -381,6 +491,40 @@ def market_arbitrage_violations() -> list[str]:
     return [k for k in _MARKET_BANNED_FROM_SHOP if k in SHOP_ITEMS]
 
 
+def m0_lianxu_economy_profiles() -> dict:
+    """M0 经济两档：存量炼虚图刷图档、新进化神首破日程档。"""
+    from services import shop
+    lianxu_keys = ("太初雾泽", "虚空裂海", "混沌古狱")
+    lianxu_values = {
+        key: map_stone_per_stamina(key) + map_drops_sell_per_stamina(key)
+        for key in lianxu_keys
+    }
+    huashen_daily_stamina = (
+        DUNGEONS["taixu"]["stamina"] * 2
+        + WORLD_BOSSES["huashen"]["stamina"]
+        + MAPS["天外古墟"]["stamina"]
+    )
+    return {
+        "stored_lianxu": {
+            "stamina_cap": R.STAMINA_CAP[5],
+            "first_buy": shop.first_buy_cost_per_stamina(5),
+            "value_cap": shop.first_buy_cost_per_stamina(5) * 0.75,
+            "map_values": lianxu_values,
+            "max_value": max(lianxu_values.values()),
+        },
+        "new_huashen": {
+            "stamina_cap": R.STAMINA_CAP[4],
+            "daily_stamina": huashen_daily_stamina,
+            "first_buy": shop.first_buy_cost_per_stamina(4),
+            "value_cap": shop.first_buy_cost_per_stamina(4) * 0.75,
+            "route_value": max(
+                dungeon_stone_per_stamina("taixu") + dungeon_drops_sell_per_stamina("taixu"),
+                map_stone_per_stamina("天外古墟") + map_drops_sell_per_stamina("天外古墟"),
+            ),
+        },
+    }
+
+
 # ---- 报告 ----
 
 def _bar(x: float) -> str:
@@ -453,6 +597,40 @@ def report() -> None:
         huashen_boss = world_boss_kill_challenges("huashen", 4, 2, n=120, profile=profile)
         print(f"  {label:<22} hp{st['hp']:>6} atk{st['atk']:>5} df{st['df']:>5} "
               f"crit{st['crit']:>4} 太虚{taixu*100:5.1f}% 化神Boss≈{huashen_boss:5.1f}次")
+    print("-" * 78)
+    print("M0 炼虚门槛/周期定稿(T0.11): 化神上界、炼虚锚点、首破与经济")
+    last4 = R.num_stages(4) - 1
+    for label, profile in (
+            ("化神攻击上界", HUASHEN_FULL_BUFF_ATK),
+            ("化神生存上界", HUASHEN_FULL_BUFF_SURV),
+    ):
+        easy_run = map_run_winrate(4, last4, "太初雾泽", profile=profile, n=120)
+        mid_run = map_run_winrate(4, last4, "虚空裂海", profile=profile, n=120)
+        hard_run = map_run_winrate(4, last4, "混沌古狱", profile=profile, n=120)
+        easy_eff = effective_map_cult_per_stamina(4, last4, "太初雾泽", profile=profile, n=120)
+        mid_eff = effective_map_cult_per_stamina(4, last4, "虚空裂海", profile=profile, n=120)
+        print(f"  {label:<8} 易图连战{easy_run*100:5.1f}% 中图连战{mid_run*100:5.1f}%"
+              f" 难图连战{hard_run*100:5.1f}%  折算修为/精力 易{easy_eff:6.1f} 中{mid_eff:6.1f}")
+    for stage, map_key in ((0, "太初雾泽"), (0, "虚空裂海"), (0, "混沌古狱"),
+                           (1, "虚空裂海"), (2, "混沌古狱")):
+        run = map_run_winrate(5, stage, map_key, profile=LIANXU_HUASHEN_GEARED, n=120)
+        boss = winrate(5, stage, MAPS[map_key]["boss"], profile=LIANXU_HUASHEN_GEARED, n=120)
+        print(f"  炼虚{stage}阶+化神装 {map_key:<5} 连战{run*100:5.1f}% Boss{boss*100:5.1f}%")
+    prog = lianxu_progression_profile()
+    ordinary = prog["ordinary"]["total_days"]
+    high = prog["high"]["total_days"]
+    print(f"  推进时长 普通活跃≈{ordinary:4.1f}天({ordinary/7:4.1f}周)"
+          f" 高活跃≈{high:4.1f}天({high/7:4.1f}周)")
+    first = lianxu_first_breakthrough_profile()
+    print(f"  首破周期 首丹≈{first['first_pill_days']:4.1f}天"
+          f" 期望消耗{first['expected_attempts']:4.2f}枚 入炼虚≈{first['entry_days']:4.1f}天"
+          f" 来源化神可及={'是' if first['huashen_accessible'] else '否'}")
+    econ = m0_lianxu_economy_profiles()
+    stored = econ["stored_lianxu"]
+    new = econ["new_huashen"]
+    print(f"  经济两档 存量炼虚图最高{stored['max_value']:5.1f}/{stored['value_cap']:5.1f}"
+          f" 新进化神路线{new['route_value']:5.1f}/{new['value_cap']:5.1f}"
+          f" 日耗精力{new['daily_stamina']}/{new['stamina_cap']}")
     print("=" * 78)
     print("世界 Boss 单次伤害 & 击杀所需挑战次数(满配)")
     for bkey, cfg in WORLD_BOSSES.items():

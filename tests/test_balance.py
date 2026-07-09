@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """数值平衡回归测试(#15)。
 
 基于 tools.balance_sim(纯函数、固定 seed → 确定值)。覆盖入门/中期/圆满
@@ -31,7 +33,7 @@ TIERS = {
 
 def test_seclusion_stage_seconds_increases_with_realm():
     secs = [R.seclusion_stage_seconds(r) for r in range(len(R.REALM_NAMES))]
-    assert secs == [16 * 3600, 24 * 3600, 36 * 3600, 48 * 3600, 96 * 3600, 144 * 3600]
+    assert secs == [16 * 3600, 24 * 3600, 36 * 3600, 48 * 3600, 96 * 3600, 720 * 3600]
     assert secs == sorted(secs)  # 越高境界每小阶越慢,抵消"小阶少→偏快"
 
 
@@ -378,6 +380,72 @@ def test_lianxu_maps_keep_stone_margin_below_stamina_buy():
     for key in TIERS[5]:
         yield_per = B.map_stone_per_stamina(key)
         assert yield_per < cap, f"{key} 产出 {yield_per:.1f} 灵石/精力 未低于炼虚首买 75%({cap:.1f})"
+
+
+def test_huashen_full_buff_lianxu_transition_is_low_efficiency():
+    """spec-v3 T0.11：化神满 buff 可磨炼虚中图普通怪，但收益须低于易图。"""
+    last = R.num_stages(4) - 1
+    profiles = (B.HUASHEN_FULL_BUFF_ATK, B.HUASHEN_FULL_BUFF_SURV)
+
+    for profile in profiles:
+        assert B.map_run_winrate(4, last, "太初雾泽", profile=profile, n=120) >= 0.95
+
+    transition_rates = [
+        (B.map_run_winrate(4, last, "虚空裂海", profile=profile, n=120), profile)
+        for profile in profiles
+    ]
+    transition, transition_profile = max(transition_rates, key=lambda item: item[0])
+    easy_eff = B.effective_map_cult_per_stamina(4, last, "太初雾泽", profile=transition_profile, n=120)
+    mid_eff = B.effective_map_cult_per_stamina(4, last, "虚空裂海", profile=transition_profile, n=120)
+
+    assert 0.15 <= transition <= 0.65
+    assert 0 < mid_eff < easy_eff
+
+
+def test_lianxu_maps_are_better_growth_route_than_huashen_maps():
+    """spec-v3 T0.11：炼虚圆满碾压化神内容，但成长路线应转向炼虚图。"""
+    from config.maps import MAPS
+
+    last = R.num_stages(5) - 1
+    assert B.map_run_winrate(5, last, "天外古墟", profile=B.LIANXU_HUASHEN_GEARED, n=120) >= 0.98
+    best_huashen = max(MAPS[key]["cult"] / MAPS[key]["stamina"] for key in TIERS[4])
+    weakest_lianxu = min(MAPS[key]["cult"] / MAPS[key]["stamina"] for key in TIERS[5])
+    assert weakest_lianxu > best_huashen
+
+
+def test_lianxu_progression_profile_hits_weeks_target():
+    """spec-v3 T0.11：普通活跃 6~9 周，高活跃不低于 4 周且更快。"""
+    profile = B.lianxu_progression_profile()
+    ordinary_days = profile["ordinary"]["total_days"]
+    high_days = profile["high"]["total_days"]
+
+    assert 42 <= ordinary_days <= 63
+    assert 28 <= high_days < ordinary_days
+
+
+def test_lianxu_first_breakthrough_profile_hits_cycle_targets():
+    """spec-v3 T0.11：首枚炼虚丹 2~4 周，期望进炼虚 4~6 周。"""
+    profile = B.lianxu_first_breakthrough_profile()
+
+    assert profile["huashen_accessible"] is True
+    assert all(source["realm"] <= 4 for source in profile["sources"])
+    assert 14 <= profile["first_pill_days"] <= 28
+    assert 28 <= profile["entry_days"] <= 42
+    assert 1.8 <= profile["expected_attempts"] <= 2.0
+
+
+def test_m0_lianxu_economy_profiles_cover_two_player_states():
+    """spec-v3 T0.11：存量化神余粮档与新进化神现刷档都不能靠买精力套利。"""
+    econ = B.m0_lianxu_economy_profiles()
+    stored = econ["stored_lianxu"]
+    new = econ["new_huashen"]
+
+    assert stored["stamina_cap"] == R.STAMINA_CAP[5]
+    assert stored["max_value"] < stored["value_cap"]
+    assert all(value < stored["value_cap"] for value in stored["map_values"].values())
+    assert new["stamina_cap"] == R.STAMINA_CAP[4]
+    assert new["daily_stamina"] <= new["stamina_cap"]
+    assert new["route_value"] < new["value_cap"]
 
 
 # ---- C1: 坊市/活动/飞升产出进反套利校验（spec DoD #3）----

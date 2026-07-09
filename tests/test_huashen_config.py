@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from config import maps as M
 from config import realms as R
 
@@ -31,7 +33,7 @@ def test_realm5_config_complete():
     assert R.REALM_NAMES[5] == "炼虚期"
     assert R.REALM_STAGES[5] == R.REALM_STAGES[4]
     assert R.STAMINA_CAP[5] == 280
-    assert R.SECLUSION_STAGE_HOURS[5] == 144
+    assert R.SECLUSION_STAGE_HOURS[5] == 720
     assert R._REALM_BASE_COST[5] == 4_000_000
     assert R._ANCHORS[5] == (
         dict(hp=78000, mp=6300, atk=5600, df=4100, spd=1300, crit=420),
