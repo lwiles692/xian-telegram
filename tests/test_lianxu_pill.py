@@ -80,6 +80,24 @@ async def test_lianxu_locked_craft_placeholders_are_visible_without_unlocking(te
 
 
 @pytest.mark.asyncio
+async def test_lianxu_forge_placeholders_turn_into_blueprint_recipes(temp_db):
+    uid = 9803
+    await character.create(uid, "开炉客")
+    await character.set_progress(uid, 5, 0, 0)
+
+    forge_text, forge_markup = await craft_handler.render_craft_category(uid, "forge")
+
+    assert "炼虚法宝（待解锁）" not in forge_text
+    assert "太初虚刃图纸" in forge_text
+    assert "玄冥空甲图纸" in forge_text
+    assert "混沌灵佩图纸" in forge_text
+    buttons = _button_texts(forge_markup)
+    assert any("太初虚刃图纸" in text for text in buttons)
+    assert any("玄冥空甲图纸" in text for text in buttons)
+    assert any("混沌灵佩图纸" in text for text in buttons)
+
+
+@pytest.mark.asyncio
 async def test_lianxu_scrap_recipe_outputs_bound_pill(temp_db):
     uid = 9801
     await character.create(uid, "炼丹客")

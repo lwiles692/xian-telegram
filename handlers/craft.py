@@ -29,7 +29,8 @@ LOCKED_RECIPE_HINTS = {
         {"realm": 4, "recipe_key": "lianxu_pill", "text": "炼虚丹（待解锁）：需炼虚丹方，集炼虚丹残方四合一护道。"},
     ],
     "forge": [
-        {"realm": 4, "recipe_key": None, "text": "炼虚法宝（待解锁）：炼虚装备图纸残页已现世，待虚空神殿开炉参悟。"},
+        {"realm": 4, "recipe_key": "lianxu_blade_blueprint",
+         "text": "炼虚法宝（待解锁）：炼虚装备图纸残页已现世，待虚空神殿开炉参悟。"},
     ],
 }
 

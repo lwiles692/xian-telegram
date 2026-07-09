@@ -39,7 +39,9 @@ HUASHEN_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
 HUASHEN_BRANCH_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
                          "mind": "归元心法", "equip": ["星河幡", "星陨袍", "幽都铃"]}
 LIANXU_HUASHEN_GEARED = HUASHEN_GEARED
-# T1.3 炼虚装备转正前，M1 先沿 M0 化神装备近似档调虚空神殿。
+LIANXU_EQUIP_KEYS = ["太初虚刃", "玄冥空甲", "混沌灵佩"]
+LIANXU_EQUIPMENT_PROFILE = {**HUASHEN_GEARED, "equip": LIANXU_EQUIP_KEYS}
+# T1.4 门槛回归重调前，LIANXU_GEARED 仍沿 M0 化神装备近似档。
 LIANXU_GEARED = LIANXU_HUASHEN_GEARED
 # 元婴圆满满 buff 上界档：现役元婴装备 + 可叠满临时/福利 buff（推到 §6.3 合算上限）。
 # 红线护栏（spec §3.2）：即便如此仍不得稳定刷化神中/难 Boss。M0 阶段不含道途。

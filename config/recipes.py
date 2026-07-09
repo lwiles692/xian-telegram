@@ -1,5 +1,6 @@
-"""炼丹 / 炼器配方（静态配置，spec §8）。"""
 from __future__ import annotations
+
+"""炼丹 / 炼器配方（静态配置，spec §8）。"""
 
 
 def _minutes(value: int) -> int:
@@ -114,6 +115,38 @@ RECIPES = {
         "name": "炼虚丹", "type": "alchemy", "realm": 4, "seconds": _minutes(45),
         "stone": 6000, "materials": {"炼虚丹残方": 4},
         "output": {"kind": "item", "key": "炼虚丹", "qty": 1, "bound": 1}, "default": False,
+    },
+    # spec-v3 §3.6/T1.3：M0 预埋残页在 M1 合成炼虚装备图纸，图纸再解锁炼器配方。
+    "lianxu_blade_blueprint": {
+        "name": "太初虚刃图纸", "type": "forge", "realm": 5, "seconds": _minutes(50),
+        "stone": 3000, "materials": {"炼虚装备图纸残页": 6, "雾泽虚砂": 2, "器魂": 4},
+        "output": {"kind": "item", "key": "太初虚刃图纸", "qty": 1}, "default": True,
+    },
+    "lianxu_armor_blueprint": {
+        "name": "玄冥空甲图纸", "type": "forge", "realm": 5, "seconds": _minutes(55),
+        "stone": 3200, "materials": {"炼虚装备图纸残页": 6, "裂海空髓": 2, "器魂": 4},
+        "output": {"kind": "item", "key": "玄冥空甲图纸", "qty": 1}, "default": True,
+    },
+    "lianxu_accessory_blueprint": {
+        "name": "混沌灵佩图纸", "type": "forge", "realm": 5, "seconds": _minutes(60),
+        "stone": 3500, "materials": {"炼虚装备图纸残页": 8, "混沌残核": 2, "器魂": 5},
+        "output": {"kind": "item", "key": "混沌灵佩图纸", "qty": 1}, "default": True,
+    },
+    "forge_lianxu_blade": {
+        "name": "太初虚刃", "type": "forge", "realm": 5, "seconds": _minutes(60),
+        "stone": 4200, "materials": {"雾泽虚砂": 8, "裂海空髓": 4, "混沌残核": 2, "器魂": 14},
+        "output": {"kind": "equipment", "key": "太初虚刃"}, "default": False,
+    },
+    "forge_lianxu_armor": {
+        "name": "玄冥空甲", "type": "forge", "realm": 5, "seconds": _minutes(65),
+        "stone": 4600, "materials": {"雾泽虚砂": 4, "裂海空髓": 8, "混沌残核": 3, "器魂": 14},
+        "output": {"kind": "equipment", "key": "玄冥空甲"}, "default": False,
+    },
+    "forge_lianxu_accessory": {
+        "name": "混沌灵佩", "type": "forge", "realm": 5, "seconds": _minutes(70),
+        "stone": 5000,
+        "materials": {"雾泽虚砂": 5, "裂海空髓": 5, "混沌残核": 4, "天外残玉": 2, "器魂": 16},
+        "output": {"kind": "equipment", "key": "混沌灵佩"}, "default": False,
     },
 }
 
