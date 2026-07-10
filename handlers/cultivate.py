@@ -90,7 +90,7 @@ def _bt_text(res: dict) -> str:
             hint = "（可往天外古墟、天魔古原寻丹，或集化神丹残方/太虚天门得方炼制。）"
         elif pill == "炼虚丹":
             # spec-v3 §3.4：炼虚首破来源必须落在化神可及内容，缺丹时直接指路。
-            hint = "（可往天外古墟、太虚天门、化神世界 Boss 寻残方，或得炼虚丹方后炼制。）"
+            hint = "（天外古墟或可直接寻得炼虚丹；亦可往天外古墟、太虚天门、化神世界 Boss 收集残方，获得炼虚丹方后炼制。）"
         return f"大境界突破需「{pill}」护道，道友尚缺此物。{hint}"
     if s == "tribulation_choice":
         tail = "\n".join(res.get("last_log") or res.get("tribulation_log") or [])

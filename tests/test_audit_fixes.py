@@ -116,6 +116,8 @@ def test_need_pill_huashen_hints_source():
     assert "化神丹残方" in huashen or "太虚天门" in huashen   # 或炼丹链路
     assert "太虚天门" in lianxu
     assert "炼虚丹方" in lianxu or "炼虚丹残方" in lianxu
+    assert "天外古墟或可直接寻得炼虚丹" in lianxu
+    assert "收集残方，获得炼虚丹方后炼制" in lianxu
     assert "天外古墟" not in yuanjing                 # 非化神丹不给误导指引
 
 
