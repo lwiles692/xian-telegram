@@ -324,6 +324,43 @@ async def test_拒绝与过期不结冷却_解除七日后山门再开(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_师徒与道侣解除冷却互不串线(temp_db):
+    from config import bonds as BONDS
+    from services import bonds
+
+    now = 510_000
+    await _备好师徒资质(304, 404)
+    await _备好境界(504, "道侣甲504", 2)
+    await _备好境界(604, "道侣乙604", 2)
+    await _插入羁绊(
+        kind=BONDS.KIND_PARTNER,
+        a_id=304,
+        b_id=904,
+        status=BONDS.STATUS_DISSOLVED,
+        created_at=now - 900,
+        dissolved_at=now - 100,
+    )
+    await _插入羁绊(
+        kind=BONDS.KIND_MENTOR,
+        a_id=504,
+        b_id=904,
+        status=BONDS.STATUS_DISSOLVED,
+        created_at=now - 900,
+        dissolved_at=now - 100,
+    )
+
+    mentor_res = await bonds.can_start_mentor_request(304, 404, now=now)
+    partner_res = await bonds.can_start_partner_request(504, 604, now=now)
+
+    assert mentor_res["status"] == "ok"
+    assert partner_res["status"] == "ok"
+    assert await bonds.cooldown_until(
+        304, now=now, kind=BONDS.KIND_PARTNER) == now - 100 + BONDS.DISSOLVE_COOLDOWN_SECONDS
+    assert await bonds.cooldown_until(
+        504, now=now, kind=BONDS.KIND_MENTOR) == now - 100 + BONDS.DISSOLVE_COOLDOWN_SECONDS
+
+
+@pytest.mark.asyncio
 async def test_徒弟同一时刻只能拜一位师父_数据库护法拦双拜(temp_db):
     from config import bonds as BONDS
 

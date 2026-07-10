@@ -56,6 +56,11 @@ class FakeBot:
         self.sent.append((chat_id, text))
 
 
+class FailingBot:
+    async def send_message(self, chat_id, text):
+        raise RuntimeError("群门已闭")
+
+
 @pytest.mark.asyncio
 async def test_auction_schema_and_instance_status_migration_are_idempotent(tmp_path):
     path = str(tmp_path / "auction-schema.db")
@@ -894,6 +899,34 @@ async def test_auction_new_listing_broadcasts_to_known_chats(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_auction_new_listing_broadcast_failure_keeps_retry_window(temp_db):
+    seller = 72551
+    chat_id = -725511
+    await db.execute(
+        "INSERT INTO bot_chats(chat_id, title, last_seen_at) VALUES(?,?,?)",
+        (chat_id, "失联拍卖群", 900))
+    await character.create(seller, "失联拍主")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+
+    failed = await auction.notify_recent_auctions(FailingBot(), now=4600)
+    failed_state = await db.fetchone(
+        "SELECT last_new_notified_at FROM auction_broadcast_state WHERE chat_id=?",
+        (chat_id,))
+    bot = FakeBot()
+    retried = await auction.notify_recent_auctions(bot, now=4700)
+    state = await db.fetchone(
+        "SELECT last_new_notified_at FROM auction_broadcast_state WHERE chat_id=?",
+        (chat_id,))
+
+    assert failed == {"sent": 0, "failed": 1, "skipped": 0, "auctions": 0}
+    assert failed_state["last_new_notified_at"] == 999
+    assert retried == {"sent": 1, "failed": 0, "skipped": 0, "auctions": 1}
+    assert state["last_new_notified_at"] == 4700
+    assert "天外残玉×1" in bot.sent[0][1]
+
+
+@pytest.mark.asyncio
 async def test_auction_closing_broadcast_once_per_chat(temp_db):
     seller = 7256
     chat_id = -725601
@@ -975,6 +1008,38 @@ async def test_closing_watcher_dm_queues_once(temp_db):
     assert len(rows) == 1
     assert "约 60 分钟后收槌" in rows[0]["text"]
     assert watcher_row["closing_notified_at"] == listed["end_at"] - 3600
+
+
+@pytest.mark.asyncio
+async def test_closing_watcher_dm_resets_after_snipe_extension(temp_db):
+    seller, watcher, bidder = 72601, 72602, 72603
+    await character.create(seller, "延拍主")
+    await character.create(watcher, "延拍关注客")
+    await character.create(bidder, "压线竞价客")
+    await character.add_item(seller, "天外残玉", 1, bound=0)
+    await character.add_stone(bidder, 1000)
+    listed = await auction.create_material_auction(seller, "天外残玉", 1, 500, now=1000)
+    assert (await auction.watch(watcher, listed["auction_id"], now=1001))["status"] == "ok"
+    await db.execute(
+        "UPDATE auctions SET end_at=? WHERE id=?",
+        (2000, listed["auction_id"]))
+
+    first = await auction.notify_closing_watchers(now=1900)
+    bid = await auction.bid(bidder, listed["auction_id"], 500, now=1901)
+    watcher_row = await db.fetchone(
+        "SELECT closing_notified_at FROM auction_watchers WHERE auction_id=? AND user_id=?",
+        (listed["auction_id"], watcher))
+    second = await auction.notify_closing_watchers(now=2000)
+    rows = await db.fetchall(
+        "SELECT * FROM social_broadcasts WHERE user_id=? AND event_type=?",
+        (watcher, "auction.closing"))
+
+    assert first == {"status": "ok", "queued": 1}
+    assert bid["extended"] is True
+    assert bid["end_at"] == 2000 + AUCTION.SNIPE_EXTEND_SECONDS
+    assert watcher_row["closing_notified_at"] is None
+    assert second == {"status": "ok", "queued": 2}
+    assert len(rows) == 2
 
 
 @pytest.mark.asyncio

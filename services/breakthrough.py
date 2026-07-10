@@ -13,6 +13,7 @@ from config.events import (
     HEART_TRIBULATION_BUFF_DURATION,
     HEART_TRIBULATION_BUFF_KEY,
     HEART_TRIBULATION_BUFF_NAME,
+    HEART_TRIBULATION_ACTION_KEY,
     HEART_TRIBULATION_DAOHANG,
     HEART_TRIBULATION_FAIL_EXTRA_LOSS_PCT,
     HEART_TRIBULATION_REWARD_FLAG,
@@ -176,6 +177,13 @@ def _tribulation_actions(target_realm: int) -> dict:
     return TRIBULATION_ACTIONS
 
 
+def _available_tribulation_actions(target_realm: int, thunder_index: int) -> dict:
+    actions = dict(_tribulation_actions(target_realm))
+    if int(thunder_index) != 3:
+        actions.pop(HEART_TRIBULATION_ACTION_KEY, None)
+    return actions
+
+
 def _trial_name(target_realm: int) -> str:
     if target_realm == 5:
         return "虚空劫"
@@ -184,8 +192,8 @@ def _trial_name(target_realm: int) -> str:
     return "雷劫"
 
 
-def _tribulation_choices(target_realm: int) -> list[dict]:
-    actions = _tribulation_actions(target_realm)
+def _tribulation_choices(target_realm: int, thunder_index: int) -> list[dict]:
+    actions = _available_tribulation_actions(target_realm, thunder_index)
     return [{"key": key, "label": cfg["label"]} for key, cfg in actions.items()]
 
 
@@ -193,7 +201,8 @@ def _tribulation_status(row) -> dict:
     return {"status": "tribulation_choice", "tribulation": True,
             "target_realm": row["target_realm"],
             "thunder_index": row["thunder_index"], "total": 3,
-            "hp": row["hp"], "choices": _tribulation_choices(row["target_realm"]),
+            "hp": row["hp"],
+            "choices": _tribulation_choices(row["target_realm"], row["thunder_index"]),
             "rate": row["rate"], "guarantee_bonus": row["guarantee_bonus"],
             "reward_flag": row["reward_flag"],
             "tribulation_log": json.loads(row["log_json"] or "[]")}
@@ -293,7 +302,8 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
         row = await _session(conn, user_id)
         if not row:
             return {"status": "no_tribulation"}
-        action = _tribulation_actions(row["target_realm"]).get(action_key)
+        action = _available_tribulation_actions(
+            row["target_realm"], row["thunder_index"]).get(action_key)
         if not action:
             return {"status": "bad_action"}
         cur = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
@@ -313,7 +323,7 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
         idx = int(row["thunder_index"])
         rng = random.Random(int(row["seed"]) + idx * 104729)
         raw = int((stats["hp"] * 0.18 + stats["df"] * 1.8) * (0.9 + rng.random() * 0.2))
-        reward_flag = action.get("reward_flag") or row["reward_flag"]
+        reward_flag = action.get("reward_flag")
         if action.get("ignore_guard"):
             shield = int(action.get("shield", 0) or 0)
         else:

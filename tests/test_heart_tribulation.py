@@ -51,7 +51,7 @@ async def test_heart_reward_flag_migration_is_idempotent(tmp_path):
 
 
 def test_heart_choice_exists_in_all_interactive_tribulations():
-    """spec-v3 §7.1：金丹起天劫、神魂劫、虚空劫均有直面心魔选项。"""
+    """spec-v3 §7.1：金丹起天劫、神魂劫、虚空劫均配置直面心魔选项。"""
     for actions in (
             EVENT_CFG.TRIBULATION_ACTIONS,
             EVENT_CFG.SHENHUN_TRIBULATION_ACTIONS,
@@ -65,25 +65,34 @@ def test_heart_choice_exists_in_all_interactive_tribulations():
 
 
 @pytest.mark.asyncio
-async def test_heart_choice_takes_raw_damage_without_guard(temp_db, monkeypatch):
+async def test_heart_choice_only_third_stage_takes_raw_damage_without_guard(temp_db, monkeypatch):
     uid = 71602
     await _prepare_big(uid, 1)
     monkeypatch.setattr(breakthrough.random, "random", lambda: 0.0)
     monkeypatch.setattr(breakthrough.random, "randint", lambda _a, _b: 1)
 
     start = await breakthrough.try_advance(uid, now=1000)
+    early = await breakthrough.choose_tribulation_action(
+        uid, EVENT_CFG.HEART_TRIBULATION_ACTION_KEY, now=1001)
+    unchanged = await db.fetchone("SELECT * FROM tribulation_sessions WHERE user_id=?", (uid,))
+    await breakthrough.choose_tribulation_action(uid, "artifact", now=1001)
+    third = await breakthrough.choose_tribulation_action(uid, "artifact", now=1002)
     row = await db.fetchone("SELECT * FROM tribulation_sessions WHERE user_id=?", (uid,))
     stats = R.base_stats(row["source_realm"], row["source_stage"])
     rng = random.Random(int(row["seed"]) + int(row["thunder_index"]) * 104729)
     raw = int((stats["hp"] * 0.18 + stats["df"] * 1.8) * (0.9 + rng.random() * 0.2))
     res = await breakthrough.choose_tribulation_action(
-        uid, EVENT_CFG.HEART_TRIBULATION_ACTION_KEY, now=1001)
-    updated = await db.fetchone("SELECT * FROM tribulation_sessions WHERE user_id=?", (uid,))
+        uid, EVENT_CFG.HEART_TRIBULATION_ACTION_KEY, now=1003)
 
     assert start["status"] == "tribulation_choice"
-    assert res["status"] == "tribulation_choice"
-    assert updated["hp"] == stats["hp"] - raw
-    assert updated["reward_flag"] == EVENT_CFG.HEART_TRIBULATION_REWARD_FLAG
+    assert EVENT_CFG.HEART_TRIBULATION_ACTION_KEY not in {c["key"] for c in start["choices"]}
+    assert early["status"] == "bad_action"
+    assert unchanged["thunder_index"] == 1
+    assert row["thunder_index"] == 3
+    assert EVENT_CFG.HEART_TRIBULATION_ACTION_KEY in {c["key"] for c in third["choices"]}
+    assert res["status"] == "big_success"
+    assert res["heart_reward"] is True
+    assert f"承伤 {raw}" in "".join(res["tribulation_log"])
 
 
 @pytest.mark.asyncio
@@ -95,10 +104,10 @@ async def test_heart_success_grants_daoxin_buff_daohang_and_broadcast(temp_db, m
     monkeypatch.setattr(breakthrough.random, "randint", lambda _a, _b: 1)
 
     start = await breakthrough.try_advance(uid, now=1000)
-    res = await breakthrough.choose_tribulation_action(
-        uid, EVENT_CFG.HEART_TRIBULATION_ACTION_KEY, now=1001)
+    res = await breakthrough.choose_tribulation_action(uid, "artifact", now=1001)
     res = await breakthrough.choose_tribulation_action(uid, "artifact", now=1002)
-    res = await breakthrough.choose_tribulation_action(uid, "artifact", now=1003)
+    res = await breakthrough.choose_tribulation_action(
+        uid, EVENT_CFG.HEART_TRIBULATION_ACTION_KEY, now=1003)
     char = await character.get_at(uid, now=1004)
     event = await db.fetchone(
         "SELECT amount FROM path_events WHERE user_id=? AND event_type='heart_tribulation'",
@@ -129,9 +138,11 @@ async def test_heart_failure_adds_extra_current_cultivation_loss_and_broadcast(t
     monkeypatch.setattr(breakthrough.random, "randint", lambda _a, _b: 1)
 
     start = await breakthrough.try_advance(uid, now=1000)
+    await breakthrough.choose_tribulation_action(uid, "artifact", now=1001)
+    await breakthrough.choose_tribulation_action(uid, "artifact", now=1002)
     await db.execute("UPDATE tribulation_sessions SET hp=1 WHERE user_id=?", (uid,))
     res = await breakthrough.choose_tribulation_action(
-        uid, EVENT_CFG.HEART_TRIBULATION_ACTION_KEY, now=1001)
+        uid, EVENT_CFG.HEART_TRIBULATION_ACTION_KEY, now=1003)
     row = await db.fetchone("SELECT realm, stage, cultivation FROM characters WHERE user_id=?", (uid,))
     broadcast = await db.fetchone(
         "SELECT text FROM social_broadcasts WHERE user_id=? AND event_type='breakthrough.heart_fail'",

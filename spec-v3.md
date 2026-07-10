@@ -105,7 +105,7 @@ v2 落地的这些能力，三期必须复用而不是另起炉灶：
 - `REALM_NAMES` 追加 `炼虚期`；`REALM_STAGES[5] = ["初期", "中期", "后期", "圆满"]`。
 - `STAMINA_CAP[5] = 280`。
 - `STAMINA_BUY_BASE[5] = 6000`，当日首买 20 精力约 300 灵石/精力。
-- `SECLUSION_STAGE_HOURS[5] = 144`，炼虚每小阶约 6 天基础闭关目标时长。
+- `SECLUSION_STAGE_HOURS[5] = 720`，T0.11 数值定稿覆盖初案 144，用于把炼虚推进压到 6~9 周。
 - `_REALM_BASE_COST[5] = 4_000_000`，`_STAGE_MULT` 沿用 1.20。
 - `BIG_BREAKTHROUGH[5] = {"pill": "炼虚丹", "base_rate": 0.45, "tribulation": True}`。
 
@@ -498,7 +498,7 @@ balance_sim（它是新的材料 sink，反过来支撑炼虚图/秘境的长期
 config.realms:
   REALM_NAMES += ["炼虚期"]
   REALM_STAGES[5]；STAMINA_CAP[5] = 280
-  SECLUSION_STAGE_HOURS[5] = 144
+  SECLUSION_STAGE_HOURS[5] = 720
   BIG_BREAKTHROUGH[5] = {"pill": "炼虚丹", "base_rate": 0.45, "tribulation": True}
   _ANCHORS[5]；_REALM_BASE_COST[5] = 4_000_000
 

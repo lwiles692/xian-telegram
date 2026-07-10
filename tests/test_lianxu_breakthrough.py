@@ -47,15 +47,17 @@ async def test_lianxu_breakthrough_enters_xukong_choices(temp_db, monkeypatch):
     text = cultivate._bt_text(start)
     old_choice = await breakthrough.choose_tribulation_action(uid, "endure", now=1001)
     step = await breakthrough.choose_tribulation_action(uid, "source", now=1002)
+    third = await breakthrough.choose_tribulation_action(uid, "artifact", now=1003)
 
     assert start["status"] == "tribulation_choice"
-    assert [choice["key"] for choice in start["choices"]] == ["source", "artifact", "pill", "heart"]
-    assert [choice["label"] for choice in start["choices"]] == ["凝守本源", "祭护体法宝", "服大还丹", "直面心魔"]
+    assert [choice["key"] for choice in start["choices"]] == ["source", "artifact", "pill"]
+    assert [choice["label"] for choice in start["choices"]] == ["凝守本源", "祭护体法宝", "服大还丹"]
     assert "虚空劫未尽" in text
     assert old_choice["status"] == "bad_action"
     assert step["status"] == "tribulation_choice"
     assert "虚空劫" in "".join(step["last_log"])
     assert "凝守本源" in "".join(step["last_log"])
+    assert [choice["key"] for choice in third["choices"]] == ["source", "artifact", "pill", "heart"]
 
 
 @pytest.mark.asyncio

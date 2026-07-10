@@ -84,6 +84,8 @@ async def confirm(session_id: int, user_id: int, now: int = None) -> dict:
         session = await _session_conn(conn, session_id)
         if not session:
             return {"status": "not_found"}
+        if user_id not in (session["a_id"], session["b_id"]):
+            return {"status": "forbidden"}
         if session["status"] == STATUS_EXPIRED:
             return {"status": "expired"}
         if session["status"] == STATUS_ACTIVE:
@@ -95,8 +97,6 @@ async def confirm(session_id: int, user_id: int, now: int = None) -> dict:
         if int(session["expires_at"]) < now:
             await _mark_status_conn(conn, session_id, STATUS_EXPIRED, now)
             return {"status": "expired"}
-        if user_id not in (session["a_id"], session["b_id"]):
-            return {"status": "forbidden"}
         if user_id == session["initiator_id"]:
             return {"status": "need_counterparty"}
         bond = await _active_bond_conn(conn, session["kind"], session["a_id"], session["b_id"])

@@ -405,7 +405,7 @@ async def _notify_recent_auctions_for_chat(bot, chat_id: int, now: int) -> dict:
     except Exception as exc:
         log.warning("auction broadcast send failed chat_id=%s auctions=%s: %s",
                     chat_id, total, exc)
-        await _remember_auction_broadcast(chat_id, now)
+        await _remember_auction_broadcast(chat_id, since)
         return {"status": "failed", "auctions": total}
     await _remember_auction_broadcast(chat_id, now)
     return {"status": "sent", "auctions": total}
@@ -725,6 +725,10 @@ async def bid(bidder_id: int, auction_id: int, amount: int, now: int = None) -> 
         await cur.close()
         if not changed:
             return {"status": "not_available"}
+        if extended:
+            await conn.execute(
+                "UPDATE auction_watchers SET closing_notified_at=NULL WHERE auction_id=?",
+                (auction_id,))
         await _record_bid(conn, auction_id, bidder_id, amount, now)
         await _ensure_watcher(conn, auction_id, bidder_id, now)
         if current_bidder is not None and current_bidder != bidder_id:

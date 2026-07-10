@@ -71,6 +71,22 @@ async def test_共修邀请确认后占周次并写活动窗口且结算幂等(t
 
 
 @pytest.mark.asyncio
+async def test_非参与者不能读取已开始共修详情(temp_db):
+    mentor_id, disciple_id = 4103, 4104
+    await _active_mentor_bond(mentor_id, disciple_id)
+
+    invited = await communion.invite(
+        BONDS.KIND_MENTOR, mentor_id, disciple_id, now=2100)
+    started = await communion.confirm(
+        invited["session_id"], disciple_id, now=2110)
+    outsider = await communion.confirm(
+        invited["session_id"], 4999, now=2120)
+
+    assert started["status"] == "ok"
+    assert outsider == {"status": "forbidden"}
+
+
+@pytest.mark.asyncio
 async def test_共修邀请超过十分钟确认会作废(temp_db):
     mentor_id, disciple_id = 4111, 4112
     await _active_mentor_bond(mentor_id, disciple_id)

@@ -23,7 +23,7 @@ def _active_day(now: int) -> str:
 
 
 def _week(now: int) -> str:
-    return time.strftime("%Y-%W", time.localtime(int(now)))
+    return time.strftime("%Y-%W", time.gmtime(int(now) + ACTIVE_DAY_TZ_OFFSET_SECONDS))
 
 
 async def expire_pending(now: int = None) -> dict:
@@ -131,7 +131,7 @@ async def mentor_overview(user_id: int, now: int = None) -> dict:
             (user_id,))
         titles = await cur.fetchall()
         await cur.close()
-        cooldown = await _cooldown_until_conn(conn, user_id, now)
+        cooldown = await _cooldown_until_conn(conn, user_id, now, kind=CFG.KIND_MENTOR)
 
     active_mentor = None
     active_disciples = []
@@ -169,7 +169,7 @@ async def _can_start_mentor_request_conn(conn, mentor_id: int, disciple_id: int,
     if gate["status"] != "ok":
         return gate
     for user_id in (mentor_id, disciple_id):
-        until = await _cooldown_until_conn(conn, user_id, now)
+        until = await _cooldown_until_conn(conn, user_id, now, kind=CFG.KIND_MENTOR)
         if until is not None:
             return {"status": "cooldown", "user_id": user_id,
                     "cooldown_until": until, "until": until}
@@ -1172,7 +1172,7 @@ async def _can_activate_mentor_bond_conn(conn, bond, now: int) -> dict:
     if gate["status"] != "ok":
         return gate
     for user_id in (bond["a_id"], bond["b_id"]):
-        until = await _cooldown_until_conn(conn, user_id, now)
+        until = await _cooldown_until_conn(conn, user_id, now, kind=CFG.KIND_MENTOR)
         if until is not None:
             return {"status": "cooldown", "user_id": user_id,
                     "cooldown_until": until, "until": until}
