@@ -31,6 +31,12 @@ def _is_master_callback(data: str | None) -> bool:
     return len(parts) > 1 and parts[1] in _MASTER_CALLBACK_OPS
 
 
+def _reply_user_id(message: Message) -> int | None:
+    reply = getattr(message, "reply_to_message", None)
+    user = getattr(reply, "from_user", None)
+    return getattr(user, "id", None)
+
+
 def _fmt_time(ts: int | None) -> str:
     if not ts:
         return "未知"
@@ -109,7 +115,7 @@ async def render_master(user_id: int):
         lines.append("桃李称号：" + "、".join(titles))
     if state["cooldown_until"]:
         lines.append(f"冷却至：{_fmt_time(state['cooldown_until'])}")
-    lines.append("用法：/master 拜师 对方ID，或 /master 收徒 对方ID。")
+    lines.append("用法：/master 拜师 对方ID，或回复对方消息发送 /master 拜师；收徒同理。")
     append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -358,10 +364,14 @@ def _result_text(res: dict) -> str:
 @router.message(Command("master"))
 async def cmd_master(message: Message):
     parts = message.text.split()
-    if len(parts) == 3 and parts[1] in {"拜师", "收徒"} and parts[2].isdigit():
-        text, markup = await render_request_confirm(message.from_user.id, parts[1], int(parts[2]))
-        await message.answer(text, reply_markup=markup)
-        return
+    if len(parts) in {2, 3} and parts[1] in {"拜师", "收徒"}:
+        other_id = int(parts[2]) if len(parts) == 3 and parts[2].isdigit() else None
+        if other_id is None and len(parts) == 2:
+            other_id = _reply_user_id(message)
+        if other_id is not None:
+            text, markup = await render_request_confirm(message.from_user.id, parts[1], other_id)
+            await message.answer(text, reply_markup=markup)
+            return
     text, markup = await render_master(message.from_user.id)
     await message.answer(text, reply_markup=markup)
 

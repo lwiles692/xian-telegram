@@ -34,11 +34,19 @@ class _Bot:
         return type("Me", (), {"username": "xian_test_bot"})()
 
 
+class _RepliedMessage:
+    def __init__(self, user_id: int):
+        self.from_user = _User(user_id)
+
+
 class _Message:
-    def __init__(self, user_id: int, text: str = "/master", chat_type: str = "private"):
+    def __init__(self, user_id: int, text: str = "/master", chat_type: str = "private",
+                 reply_to_user_id: int | None = None):
         self.from_user = _User(user_id)
         self.text = text
         self.chat = _Chat(chat_type)
+        self.reply_to_message = (_RepliedMessage(reply_to_user_id)
+                                 if reply_to_user_id is not None else None)
         self.bot = _Bot()
         self.answers = []
         self.edits = []
@@ -124,6 +132,20 @@ async def test_master_群内入口可展示师徒页面(temp_db):
     await bonds_handler.cmd_master(msg)
 
     assert msg.answers and msg.answers[0][1] is not None
+
+
+@pytest.mark.asyncio
+async def test_master_回复消息可省略对方ID(temp_db):
+    mentor_id, disciple_id = 7002, 7003
+    await _备好师徒资质(mentor_id, disciple_id)
+    msg = _Message(mentor_id, "/master 收徒", chat_type="group",
+                   reply_to_user_id=disciple_id)
+
+    await bonds_handler.cmd_master(msg)
+
+    assert msg.answers and msg.answers[0][1] is not None
+    assert any(data.startswith(f"bond:create:{mentor_id}:{disciple_id}:")
+               for data in _datas(msg.answers[0][1]))
 
 
 @pytest.mark.asyncio
