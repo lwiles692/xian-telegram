@@ -38,8 +38,9 @@ def _reply_user_id(message: Message) -> int | None:
     return getattr(user, "id", None)
 
 
-async def _send_master_request(message: Message, op: str, other_id: int) -> None:
-    text, markup = await render_request_confirm(message.from_user.id, op, other_id)
+async def _send_request_to_private(message: Message, text: str,
+                                   markup: InlineKeyboardMarkup | None,
+                                   relation: str) -> None:
     if is_private_chat(message.chat):
         await message.answer(text, reply_markup=markup)
         return
@@ -47,12 +48,22 @@ async def _send_master_request(message: Message, op: str, other_id: int) -> None
         await message.bot.send_message(message.from_user.id, text, reply_markup=markup)
     except Exception:
         link = await dm_link(message.bot)
-        prompt = "师徒确认需要在私聊完成，请先私聊机器人发送 /start，再重新回复对方发送本指令。"
+        prompt = f"{relation}确认需要在私聊完成，请先私聊机器人发送 /start，再重新回复对方发送本指令。"
         if link:
             prompt += f"\n私聊入口：{link}"
         await message.answer(prompt)
         return
-    await message.answer("师徒确认页已发至你的私聊，请前往机器人私聊完成确认。")
+    await message.answer(f"{relation}确认页已发至你的私聊，请前往机器人私聊完成确认。")
+
+
+async def _send_master_request(message: Message, op: str, other_id: int) -> None:
+    text, markup = await render_request_confirm(message.from_user.id, op, other_id)
+    await _send_request_to_private(message, text, markup, "师徒")
+
+
+async def _send_partner_request(message: Message, other_id: int) -> None:
+    text, markup = await render_partner_request_confirm(message.from_user.id, other_id)
+    await _send_request_to_private(message, text, markup, "道侣")
 
 
 def _fmt_time(ts: int | None) -> str:
@@ -171,7 +182,7 @@ async def render_partner(user_id: int):
         ])
     else:
         lines.append("道侣：暂无")
-        lines.append("用法：/partner 结契 对方ID。双方需金丹期以上，确认时消耗 1 枚绑定同心结。")
+        lines.append("用法：/partner 结契 对方ID，或回复对方消息发送 /partner 结契；确认页会发到私聊。")
     if state["pending_incoming"]:
         lines.append("待你确认的结契帖：")
         for item in state["pending_incoming"]:
@@ -235,7 +246,7 @@ async def render_request_confirm(user_id: int, op: str, other_id: int):
     if res["status"] != "ok":
         return _result_text(res), section_back_markup("↩️ 返回师徒", "nav:master")
     text = (
-        f"🤝 {op}确认\n"
+        f"🤝 递出拜师帖确认 · {op}\n"
         f"师父：{res['mentor_name']}\n"
         f"徒弟：{res['disciple_name']}\n"
         "解除后重拜，出师累计活跃天数从 0 重计。请确认双方知晓此规。"
@@ -253,7 +264,7 @@ async def render_partner_request_confirm(user_id: int, other_id: int):
     if res["status"] != "ok":
         return _result_text(res), section_back_markup("↩️ 返回道侣", "nav:partner")
     text = (
-        "💞 结契确认\n"
+        "💞 递出结契帖确认 · 结契\n"
         f"发起：{res['a_name']}\n"
         f"对方：{res['b_name']}\n"
         f"需双方金丹期以上；确认时消耗 1 枚绑定{BONDS.PARTNER_TOKEN_ITEM}。"
@@ -395,12 +406,15 @@ async def cmd_master(message: Message):
 
 @router.message(Command("partner"))
 async def cmd_partner(message: Message):
-    if await guard_private_message(message):
-        return
     parts = message.text.split()
-    if len(parts) == 3 and parts[1] == "结契" and parts[2].isdigit():
-        text, markup = await render_partner_request_confirm(message.from_user.id, int(parts[2]))
-        await message.answer(text, reply_markup=markup)
+    if len(parts) in {2, 3} and parts[1] == "结契":
+        other_id = int(parts[2]) if len(parts) == 3 and parts[2].isdigit() else None
+        if other_id is None and len(parts) == 2:
+            other_id = _reply_user_id(message)
+        if other_id is not None:
+            await _send_partner_request(message, other_id)
+            return
+    if await guard_private_message(message):
         return
     text, markup = await render_partner(message.from_user.id)
     await message.answer(text, reply_markup=markup)
