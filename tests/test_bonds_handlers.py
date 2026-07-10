@@ -187,6 +187,23 @@ async def test_partner_群内入口被私聊护法拦下(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_partner_群内回复将结契确认发入私聊(temp_db):
+    a_id, b_id = 7102, 7103
+    await _备好道侣资质(a_id, b_id)
+    msg = _Message(a_id, "/partner 结契", chat_type="group",
+                   reply_to_user_id=b_id)
+
+    await bonds_handler.cmd_partner(msg)
+
+    assert msg.answers and msg.answers[0][1] is None
+    assert len(msg.bot.sent) == 1
+    sent_chat, _text, markup = msg.bot.sent[0]
+    assert sent_chat == a_id
+    assert any(data.startswith(f"bond:pcreate:{a_id}:{b_id}:")
+               for data in _datas(markup))
+
+
+@pytest.mark.asyncio
 async def test_master_收徒确认页公示重拜代价(temp_db):
     mentor_id, disciple_id = 7011, 7012
     await _备好师徒资质(mentor_id, disciple_id)
@@ -212,7 +229,7 @@ async def test_partner_结契确认与道侣首页走一次性令牌(temp_db):
         "SELECT * FROM social_bonds WHERE kind='partner' AND a_id=? AND b_id=?",
         (a_id, b_id))
 
-    assert "结契确认" in text
+    assert "递出结契帖确认" in text
     assert "同心结" in text
     assert pending["status"] == "pending"
     assert "结契帖已递出" in created.message.edits[-1][0]
