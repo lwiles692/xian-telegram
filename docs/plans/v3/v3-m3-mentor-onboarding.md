@@ -84,7 +84,7 @@ dissolved 后 7 天冷却生效。
 ### T3.8 handlers + 播报(`handlers/bonds.py`)
 
 - `/master` 或并入现有社交入口(定稿时定命令名):拜师/收徒/传功/解除/出师界面;
-  状态变更全部 `action_callback_data` + `consume_action_callback`;私聊 gate。
+  状态变更全部 `action_callback_data` + `consume_action_callback`;私聊、群聊均可进入。
 - 拜师成立/出师/桃李称号进 `game_events` 群播报。
 
 ---
