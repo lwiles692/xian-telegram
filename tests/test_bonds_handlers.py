@@ -30,8 +30,19 @@ class _Chat:
 
 
 class _Bot:
+    def __init__(self):
+        self.sent = []
+
     async def get_me(self):
         return type("Me", (), {"username": "xian_test_bot"})()
+
+    async def send_message(self, chat_id, text, reply_markup=None):
+        self.sent.append((chat_id, text, reply_markup))
+
+
+class _FailingBot(_Bot):
+    async def send_message(self, chat_id, text, reply_markup=None):
+        raise RuntimeError("private chat unavailable")
 
 
 class _RepliedMessage:
@@ -143,9 +154,26 @@ async def test_master_回复消息可省略对方ID(temp_db):
 
     await bonds_handler.cmd_master(msg)
 
-    assert msg.answers and msg.answers[0][1] is not None
+    assert msg.answers and msg.answers[0][1] is None
+    assert len(msg.bot.sent) == 1
+    sent_chat, _text, markup = msg.bot.sent[0]
+    assert sent_chat == mentor_id
     assert any(data.startswith(f"bond:create:{mentor_id}:{disciple_id}:")
-               for data in _datas(msg.answers[0][1]))
+               for data in _datas(markup))
+
+
+@pytest.mark.asyncio
+async def test_master_私聊未开启时群内提示私聊入口(temp_db):
+    mentor_id, disciple_id = 7004, 7005
+    await _备好师徒资质(mentor_id, disciple_id)
+    msg = _Message(mentor_id, "/master 收徒", chat_type="group",
+                   reply_to_user_id=disciple_id)
+    msg.bot = _FailingBot()
+
+    await bonds_handler.cmd_master(msg)
+
+    assert msg.answers and msg.answers[0][1] is None
+    assert "私聊入口" in msg.answers[0][0]
 
 
 @pytest.mark.asyncio
