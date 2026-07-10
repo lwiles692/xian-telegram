@@ -12,6 +12,7 @@ from config import bonds as BONDS
 from config.items import item_name
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
                              button_grid, consume_action_callback,
+                             dm_link,
                              guard_private_callback, guard_private_message,
                              is_private_chat, section_back_markup, show)
 from services import bonds as bonds_service, character, communion
@@ -35,6 +36,23 @@ def _reply_user_id(message: Message) -> int | None:
     reply = getattr(message, "reply_to_message", None)
     user = getattr(reply, "from_user", None)
     return getattr(user, "id", None)
+
+
+async def _send_master_request(message: Message, op: str, other_id: int) -> None:
+    text, markup = await render_request_confirm(message.from_user.id, op, other_id)
+    if is_private_chat(message.chat):
+        await message.answer(text, reply_markup=markup)
+        return
+    try:
+        await message.bot.send_message(message.from_user.id, text, reply_markup=markup)
+    except Exception:
+        link = await dm_link(message.bot)
+        prompt = "师徒确认需要在私聊完成，请先私聊机器人发送 /start，再重新回复对方发送本指令。"
+        if link:
+            prompt += f"\n私聊入口：{link}"
+        await message.answer(prompt)
+        return
+    await message.answer("师徒确认页已发至你的私聊，请前往机器人私聊完成确认。")
 
 
 def _fmt_time(ts: int | None) -> str:
@@ -369,8 +387,7 @@ async def cmd_master(message: Message):
         if other_id is None and len(parts) == 2:
             other_id = _reply_user_id(message)
         if other_id is not None:
-            text, markup = await render_request_confirm(message.from_user.id, parts[1], other_id)
-            await message.answer(text, reply_markup=markup)
+            await _send_master_request(message, parts[1], other_id)
             return
     text, markup = await render_master(message.from_user.id)
     await message.answer(text, reply_markup=markup)
