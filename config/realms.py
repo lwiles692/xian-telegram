@@ -1,17 +1,25 @@
+from __future__ import annotations
+
 """境界、属性、修为成本 —— 全部静态数值（初版可调）。
 
 防御属性键用 ``df``（避开 Python 关键字 ``def``），全局一致。
-大境界索引 0..4 = 炼气 / 筑基 / 金丹 / 元婴 / 化神。
+大境界索引 0..5 = 炼气 / 筑基 / 金丹 / 元婴 / 化神 / 炼虚。
 """
-from __future__ import annotations
 
-REALM_NAMES = ["炼气期", "筑基期", "金丹期", "元婴期", "化神期"]
+REALM_NAMES = ["炼气期", "筑基期", "金丹期", "元婴期", "化神期", "炼虚期"]
 
 _QI_LAYERS = ["一层", "二层", "三层", "四层", "五层", "六层", "七层",
               "八层", "九层", "十层", "十一层", "十二层", "十三层"]
 _SUB_STAGES = ["初期", "中期", "后期", "圆满"]
 
-REALM_STAGES = {0: _QI_LAYERS, 1: _SUB_STAGES, 2: _SUB_STAGES, 3: _SUB_STAGES, 4: _SUB_STAGES}
+REALM_STAGES = {
+    0: _QI_LAYERS,
+    1: _SUB_STAGES,
+    2: _SUB_STAGES,
+    3: _SUB_STAGES,
+    4: _SUB_STAGES,
+    5: _SUB_STAGES,
+}
 
 STAT_KEYS = ("hp", "mp", "atk", "df", "spd", "crit")
 
@@ -21,9 +29,10 @@ BIG_BREAKTHROUGH = {
     2: {"pill": "金丹", "base_rate": 0.70, "tribulation": True},
     3: {"pill": "元婴丹", "base_rate": 0.60, "tribulation": True},
     4: {"pill": "化神丹", "base_rate": 0.50, "tribulation": True},
+    5: {"pill": "炼虚丹", "base_rate": 0.45, "tribulation": True},
 }
 
-_REALM_BASE_COST = {0: 200, 1: 800, 2: 6000, 3: 50000, 4: 450000}
+_REALM_BASE_COST = {0: 200, 1: 800, 2: 6000, 3: 50000, 4: 450000, 5: 4_000_000}
 _STAGE_MULT = 1.20
 
 # 属性锚点：每大境界 (初阶, 圆满)，小阶间线性插值。
@@ -38,13 +47,16 @@ _ANCHORS = {
         dict(hp=16000, mp=1500, atk=1300, df=950, spd=380, crit=140)),
     4: (dict(hp=24000, mp=2200, atk=1850, df=1350, spd=500, crit=175),
         dict(hp=52000, mp=4200, atk=3800, df=2800, spd=900, crit=280)),
+    5: (dict(hp=78000, mp=6300, atk=5600, df=4100, spd=1300, crit=420),
+        dict(hp=170000, mp=13500, atk=12000, df=8800, spd=2300, crit=700)),
 }
 
-STAMINA_CAP = {0: 100, 1: 120, 2: 150, 3: 200, 4: 240}
+STAMINA_CAP = {0: 100, 1: 120, 2: 150, 3: 200, 4: 240, 5: 280}
 
 # 闭关每小阶目标时长（小时），按大境界配置（#15）。
 # 炼气小阶多、放快；金丹/元婴小阶少、放慢，抵消"高境界小阶少→整体推进偏快"。
-SECLUSION_STAGE_HOURS = {0: 16, 1: 24, 2: 36, 3: 48, 4: 96}
+# 炼虚档经 spec-v3 T0.11 定稿：配合炼虚图修为，使普通活跃档推进约 6~9 周。
+SECLUSION_STAGE_HOURS = {0: 16, 1: 24, 2: 36, 3: 48, 4: 96, 5: 720}
 _DEFAULT_SECLUSION_HOURS = 24
 
 

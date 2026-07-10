@@ -1,5 +1,6 @@
-"""物品定义（静态）。type: equipment/material/pill/page/recipe。"""
 from __future__ import annotations
+
+"""物品定义（静态）。type: equipment/material/pill/page/recipe。"""
 
 ITEMS = {
     "新手剑": {"name": "新手木剑", "type": "equipment", "slot": "weapon",
@@ -16,6 +17,7 @@ ITEMS = {
     "妖丹":   {"name": "妖丹",     "type": "material", "sell": 18},
     "天材地宝": {"name": "天材地宝", "type": "material", "sell": 80},
     "器魂":   {"name": "器魂",     "type": "material", "sell": 6},
+    "同心结": {"name": "同心结", "type": "material", "sell": 0},
     # 困难图独占材料（#20）：留作后续炼丹/炼器/突破扩展，卖价偏低以免成为灵石 faucet。
     "阴风石": {"name": "阴风石",   "type": "material", "sell": 8},
     "幽冥草": {"name": "幽冥草",   "type": "material", "sell": 8},
@@ -38,6 +40,12 @@ ITEMS = {
     "元婴丹": {"name": "元婴丹",   "type": "pill", "sell": 500},
     "化神丹": {"name": "化神丹",   "type": "pill", "sell": 700},
     "化神丹残方": {"name": "化神丹残方", "type": "material", "sell": 90},
+    "炼虚丹": {"name": "炼虚丹",   "type": "pill", "sell": 900},
+    "炼虚丹残方": {"name": "炼虚丹残方", "type": "material", "sell": 120},
+    "炼虚装备图纸残页": {"name": "炼虚装备图纸残页", "type": "material", "sell": 100},
+    "雾泽虚砂": {"name": "雾泽虚砂", "type": "material", "sell": 140},
+    "裂海空髓": {"name": "裂海空髓", "type": "material", "sell": 160},
+    "混沌残核": {"name": "混沌残核", "type": "material", "sell": 180},
     "星陨砂": {"name": "星陨砂", "type": "material", "sell": 85},
     "幽都魂晶": {"name": "幽都魂晶", "type": "material", "sell": 95},
     "天外残玉": {"name": "天外残玉", "type": "material", "sell": 110},
@@ -66,7 +74,16 @@ ITEMS = {
              "tribulation_shield": 190},
     "幽都铃": {"name": "幽都铃", "type": "equipment", "slot": "accessory",
              "tier": "玄", "bonus": {"mp": 540, "spd": 50}, "breakthrough_rate": 0.035},
+    "太初虚刃": {"name": "太初虚刃", "type": "equipment", "slot": "weapon",
+             "tier": "玄", "bonus": {"atk": 820, "crit": 48, "atk_pct": 0.02}},
+    "玄冥空甲": {"name": "玄冥空甲", "type": "equipment", "slot": "armor",
+             "tier": "玄", "bonus": {"hp": 4200, "df": 760, "hp_pct": 0.02},
+             "tribulation_shield": 320},
+    "混沌灵佩": {"name": "混沌灵佩", "type": "equipment", "slot": "accessory",
+             "tier": "玄", "bonus": {"mp": 900, "spd": 130, "df_pct": 0.015},
+             "breakthrough_rate": 0.045},
     "化神丹方": {"name": "化神丹方", "type": "recipe", "recipe": "huashen_pill"},
+    "炼虚丹方": {"name": "炼虚丹方", "type": "recipe", "recipe": "lianxu_pill"},
     "天魔刃图纸": {"name": "天魔刃图纸", "type": "recipe", "recipe": "forge_yuanying_blade"},
     "战魂甲图纸": {"name": "战魂甲图纸", "type": "recipe", "recipe": "forge_yuanying_armor"},
     "古战佩图纸": {"name": "古战佩图纸", "type": "recipe", "recipe": "forge_yuanying_accessory"},
@@ -76,6 +93,9 @@ ITEMS = {
     "星河幡图纸": {"name": "星河幡图纸", "type": "recipe", "recipe": "forge_huashen_banner"},
     "星陨袍图纸": {"name": "星陨袍图纸", "type": "recipe", "recipe": "forge_huashen_robe"},
     "幽都铃图纸": {"name": "幽都铃图纸", "type": "recipe", "recipe": "forge_huashen_bell"},
+    "太初虚刃图纸": {"name": "太初虚刃图纸", "type": "recipe", "recipe": "forge_lianxu_blade"},
+    "玄冥空甲图纸": {"name": "玄冥空甲图纸", "type": "recipe", "recipe": "forge_lianxu_armor"},
+    "混沌灵佩图纸": {"name": "混沌灵佩图纸", "type": "recipe", "recipe": "forge_lianxu_accessory"},
     "归元心法残页": {"name": "归元心法残页", "type": "page", "skill": "归元心法", "need": 3},
     "烈火诀残页": {"name": "烈火诀残页", "type": "page", "skill": "烈火诀", "need": 3},
     "回春术残页": {"name": "回春术残页", "type": "page", "skill": "回春术", "need": 3},
@@ -86,9 +106,9 @@ ITEMS = {
 }
 
 
-# 禁止玩家坊市交易的物品（spec §3.4 化神丹不直售；§7.1/T5.4 转修令/保命符默认绑定）。
+# 禁止玩家坊市交易的物品（spec §3.4 化神丹/炼虚丹不直售；§7.1/T5.4 转修令/保命符默认绑定）。
 # 掉落即以 bound=0 进包，但这些关键材料不得经坊市绕过 NPC 直售 / 转修成本 / 绑定语义。
-NO_TRADE = frozenset({"转修令", "化神丹", "保命符"})
+NO_TRADE = frozenset({"转修令", "化神丹", "炼虚丹", "保命符", "同心结"})
 
 
 def is_tradable(key: str) -> bool:

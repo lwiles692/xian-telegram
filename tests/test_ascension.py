@@ -45,6 +45,19 @@ async def test_ascension_trial_grants_points_and_costs_daohang(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_ascension_trial_stays_unlocked_after_lianxu_breakthrough(temp_db):
+    uid = 9510
+    await character.create(uid, "trial-lianxu")
+    await character.set_progress(uid, 5, 0, 0)
+    await db.execute("UPDATE characters SET daohang=? WHERE user_id=?", (CFG.TRIAL_DAOHANG_COST + 100, uid))
+
+    res = await ascension.trial(uid, now=1000)
+
+    assert res["status"] == "ok"
+    assert (await ascension.get(uid))["points"] == CFG.TRIAL_POINT_REWARD
+
+
+@pytest.mark.asyncio
 async def test_ascension_trial_weekly_cooldown(temp_db):
     """R-P1-2：每周仅一次飞升试炼——同周第二次拒绝，防囤道行无限刷飞升点。"""
     uid = 9509

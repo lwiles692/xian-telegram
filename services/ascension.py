@@ -14,6 +14,12 @@ def _week(now: int) -> str:
     return time.strftime("%Y-%W", time.localtime(now))
 
 
+def _trial_unlocked(realm: int, stage: int) -> bool:
+    if realm > CFG.TRIAL_UNLOCK_REALM:
+        return True
+    return realm == CFG.TRIAL_UNLOCK_REALM and stage == R.num_stages(realm) - 1
+
+
 async def get(user_id: int) -> dict:
     row = await db.fetchone("SELECT * FROM ascension WHERE user_id=?", (user_id,))
     if not row:
@@ -46,7 +52,7 @@ async def trial(user_id: int, now: int = None) -> dict:
         await cur.close()
         if not ch:
             return {"status": "missing"}
-        if ch["realm"] != len(R.REALM_NAMES) - 1 or ch["stage"] != R.num_stages(ch["realm"]) - 1:
+        if not _trial_unlocked(ch["realm"], ch["stage"]):
             return {"status": "locked"}
         # spec §6.2：每周仅可完成一次飞升试炼，防止囤道行无限刷飞升点旁路 5 级硬上限。
         week = _week(now)

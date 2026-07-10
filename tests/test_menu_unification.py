@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import pytest
 import pytest_asyncio
 
-from handlers import (ascension as ascension_handler, bag as bag_handler,
+from handlers import (ascension as ascension_handler, auction as auction_handler,
+                      bag as bag_handler,
+                      bonds as bonds_handler,
                       craft as craft_handler, cultivate as cultivate_handler,
                       dao_path as dao_path_handler, dungeon as dungeon_handler,
                       explore as explore_handler, help as help_handler,
@@ -57,11 +61,14 @@ async def test_top_level_feature_pages_do_not_embed_full_main_menu(temp_db):
         ("商店", await shop_handler.render_shop(uid)),
         ("储物袋", await bag_handler.render_bag(uid)),
         ("悬赏", await quest_handler.render_quest(uid)),
+        ("师徒", await bonds_handler.render_master(uid)),
+        ("道侣", await bonds_handler.render_partner(uid)),
         ("宗门", await sect_handler.render_sect(uid)),
         ("道途", await dao_path_handler.render_path(uid)),
         ("飞升", await ascension_handler.render_ascension(uid)),
         ("活动", await weekly_handler.render_weekly(uid)),
         ("坊市", await market_handler.render_market(uid)),
+        ("拍卖", await auction_handler.render_auction(uid)),
         ("宗门战", await sect_war_handler.render_sect_war(uid)),
     ]
 

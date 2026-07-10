@@ -1,11 +1,12 @@
-"""每日签到（spec §9/§12 指令表）。"""
 from __future__ import annotations
+
+"""每日签到（spec §9/§12 指令表）。"""
 
 import time
 
 from config import realms as R
 from models import db
-from services import character as character_service
+from services import character as character_service, game_events
 
 HUASHEN_AID_ITEM = "化神丹"
 YUANYING_REALM = 3
@@ -67,6 +68,8 @@ async def checkin(user_id: int, now: int = None) -> dict:
             "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
             (reward, user_id))
         aid = await _maybe_grant_huashen_aid_conn(conn, user_id, char)
+        await game_events.emit_conn(
+            conn, user_id, "daily.checkin", {"streak": streak, "amount": 1}, now)
         return {
             "status": "ok",
             "streak": streak,

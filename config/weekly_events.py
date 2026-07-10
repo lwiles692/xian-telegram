@@ -1,10 +1,13 @@
-"""周活动副本配置（v2 M4）。"""
+from __future__ import annotations
+
+"""周活动副本配置（v2 M4 / spec-v3 T4.4）。"""
 
 WEEKLY_DAOHANG_CAP = 300
 RUN_DAOHANG_REWARD = 120
 RUN_STAMINA_COST = 40
 RUN_DURATION_SECONDS = 20 * 60
 ACTIVITY_MATERIAL = "天魔令"
+PARTNER_WEEKLY_TASK_DAOHANG = 30
 
 WEEKLY_THEMES = {
     "tianmo": {"name": "天魔潮", "material": ACTIVITY_MATERIAL},
@@ -24,6 +27,8 @@ SHOP_OFFERS = {
                      "reward_qty": 1, "material_cost": 4},
     "path_material": {"name": "天外残玉", "reward_kind": "item", "reward_item": "天外残玉",
                       "reward_qty": 1, "material_cost": 5},
+    "heart_knot": {"name": "同心结", "reward_kind": "item", "reward_item": "同心结",
+                   "reward_qty": 1, "material_cost": 6},
     "ascension": {"name": "飞升点", "reward_kind": "ascension",
                   "reward_qty": 1, "material_cost": 3},
 }

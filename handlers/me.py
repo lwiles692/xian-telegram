@@ -1,5 +1,6 @@
-"""/me —— 角色面板。"""
 from __future__ import annotations
+
+"""/me —— 角色面板。"""
 
 import time
 
@@ -12,7 +13,7 @@ from config.items import item_name
 from config.skills import skill_name
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
                              menu_with_breakthrough, progress_bar, show)
-from services import character, quests
+from services import bonds as bonds_service, character, quests
 
 router = Router()
 
@@ -30,6 +31,7 @@ async def render_me(user_id: int):
     mind = await character.get_mind_skill(user_id)
     skills = await character.get_skills(user_id)
     weapon_key = character.current_weapon_key(char, equipped)
+    overflow = await character.overflow_status(user_id)
     seclusion = "（闭关中 🧘）" if char.seclusion_at else ""
     lines = [
         f"📜 {char.spirit_root} · 根骨 {char.root_bone}",
@@ -43,6 +45,12 @@ async def render_me(user_id: int):
         "📖 心法：" + (skill_name(mind) if mind else "无"),
         "📖 战技：" + ("、".join(skill_name(s) for s in skills) if skills else "无"),
     ]
+    partner = await bonds_service.partner_overview(user_id)
+    if partner["status"] == "ok" and partner["active_partner"]:
+        active = partner["active_partner"]
+        lines.append(f"💞 道侣：{active['partner_name']}（{partner['title']}）")
+    if overflow.get("active"):
+        lines.append(f"🌌 溢出分流：{overflow['label']}")
     if int(char.debuff_json.get("unstable_until", 0)) > int(time.time()):
         lines.append("⚠️ 道基不稳：法身六维暂降。")
     ach = (await quests.list_status(user_id))["achievements"]

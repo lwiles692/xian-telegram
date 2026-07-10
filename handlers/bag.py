@@ -1,10 +1,12 @@
-"""/bag —— 最简储物袋。"""
 from __future__ import annotations
+
+"""/bag —— 最简储物袋。"""
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from config import auction as auction_cfg
 from config.items import ITEMS, is_usable, item_name
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
                              button_grid, consume_action_callback,
@@ -99,7 +101,8 @@ async def render_bag_category(user_id: int, cat: str):
                 callback_data=await action_callback_data(user_id, f"bag:use:{key}")))
     elif cat == "equipment":
         for inst in instances:
-            mark = "已装备" if inst["equipped_slot"] else "未装备"
+            mark = ("拍卖托管" if inst.get("status") == auction_cfg.INSTANCE_STATUS_AUCTION
+                    else ("已装备" if inst["equipped_slot"] else "未装备"))
             lines.append(f"#{inst['id']} {item_name(inst['base_key'])}（{mark}）")
     rows = button_grid(buttons)
     rows.append([InlineKeyboardButton(text="↩️ 返回储物袋", callback_data="nav:bag")])

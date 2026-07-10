@@ -1,5 +1,6 @@
-"""/quest —— 每日/周常悬赏与成就。"""
 from __future__ import annotations
+
+"""/quest —— 每日/周常悬赏与成就。"""
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -20,7 +21,12 @@ async def render_quest(user_id: int):
     lines = ["📜 悬赏"]
     rows = []
     for q in state["quests"]:
-        tag = "日常" if q["period"] == "daily" else "周常"
+        if q["period"] == "daily":
+            tag = "日常"
+        elif q["period"] == "weekly":
+            tag = "周常"
+        else:
+            tag = "引导"
         suffix = "已领" if q["claimed"] else "可领" if q["ready"] else ""
         lines.append(f"{tag}·{q['name']}：{q['progress']}/{q['target']} {suffix}".rstrip())
         if q["ready"]:
@@ -43,6 +49,8 @@ def _claim_text(res: dict) -> str:
         return "此悬赏已领取。"
     if res["status"] == "not_ready":
         return "悬赏尚未完成。"
+    if res["status"] == "not_open":
+        return "此引导机缘尚未开启或已过时。"
     return "查无此悬赏。"
 
 

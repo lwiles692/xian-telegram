@@ -3,7 +3,8 @@
 > 对应 spec-v3 §7.2、§8.2、§10。
 > 目标:与境界正交的长期成长维度,承接炼虚材料 sink,与器修道途协同。
 > 前置:M1(炼虚材料管线)、M2(拍卖托管语义,认主实例需排除)。
-> **spec 明确:M5 启动前补 detail 文件**——本文件只固化骨架与红线,数值与喂养曲线届时定稿。
+> **spec 明确:M5 启动前补 detail 文件**——本文件只固化骨架与红线。
+> 数值与喂养曲线见 [v3-m5-natal-detail.md](v3-m5-natal-detail.md)。
 
 新模块:`config/natal.py`、`services/natal.py`(handler 并入 `handlers/bag.py` 或独立,届时定)。
 

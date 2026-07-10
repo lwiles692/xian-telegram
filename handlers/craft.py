@@ -1,5 +1,6 @@
-"""/craft —— 炼丹炼器。"""
 from __future__ import annotations
+
+"""/craft —— 炼丹炼器。"""
 
 import time
 
@@ -23,6 +24,22 @@ CRAFT_CATEGORIES = [
 ]
 _CAT_TITLE = {cat: title for cat, title, _ in CRAFT_CATEGORIES}
 _CAT_ICON = {"alchemy": "💊", "forge": "⚒️"}
+LOCKED_RECIPE_HINTS = {
+    "alchemy": [
+        {"realm": 4, "recipe_key": "lianxu_pill", "text": "炼虚丹（待解锁）：需炼虚丹方，集炼虚丹残方四合一护道。"},
+    ],
+    "forge": [
+        {"realm": 4, "recipe_key": "lianxu_blade_blueprint",
+         "text": "炼虚法宝（待解锁）：炼虚装备图纸残页已现世，待虚空神殿开炉参悟。"},
+    ],
+}
+
+
+def _collected_text(item: dict) -> str:
+    text = f"{item['name']}×{item.get('qty', 1)}"
+    if item.get("daohang"):
+        text += f"（道行+{item['daohang']}）"
+    return text
 
 
 def _duration(seconds: int) -> str:
@@ -36,6 +53,18 @@ def _duration(seconds: int) -> str:
     return f"{hours} 小时 {rest} 分钟" if rest else f"{hours} 小时"
 
 
+def _locked_hints(cat: str, realm: int, shown_keys: set[str]) -> list[str]:
+    hints = []
+    for hint in LOCKED_RECIPE_HINTS.get(cat, []):
+        if realm < hint["realm"]:
+            continue
+        recipe_key = hint.get("recipe_key")
+        if recipe_key and recipe_key in shown_keys:
+            continue
+        hints.append(hint["text"])
+    return hints
+
+
 async def render_craft(user_id: int):
     char = await character.get(user_id)
     if not char:
@@ -44,8 +73,7 @@ async def render_craft(user_id: int):
     active = await crafting.active_job(user_id)
     lines = ["💊 炼丹炼器"]
     if collected:
-        lines.append("出炉：" + "、".join(
-            f"{c['name']}×{c.get('qty', 1)}" for c in collected))
+        lines.append("出炉：" + "、".join(_collected_text(c) for c in collected))
     rows = []
     if active:
         recipe = RECIPES[active["recipe_key"]]
@@ -88,12 +116,17 @@ async def render_craft_category(user_id: int, cat: str):
 
     lines = [f"{_CAT_ICON[cat]} {_CAT_TITLE[cat]}"]
     buttons = []
+    shown_keys = {key for key, _recipe in recipes}
     for key, recipe in recipes:
         mats = "、".join(f"{item_name(k)}×{v}" for k, v in recipe["materials"].items())
         lines.append(f"- {recipe['name']}：{mats} / 🪙{recipe['stone']} / {_duration(recipe['seconds'])}")
         buttons.append(InlineKeyboardButton(
             text=f"{recipe['name']} {recipe['stone']}",
             callback_data=await action_callback_data(user_id, f"craft:start:{key}")))
+    locked = _locked_hints(cat, char.realm, shown_keys)
+    if locked:
+        lines.append("未启炉线索：")
+        lines.extend(f"- {text}" for text in locked)
     rows = button_grid(buttons)
     rows.append([InlineKeyboardButton(text="↩️ 返回炼制", callback_data="nav:craft")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
@@ -117,7 +150,7 @@ def _result_text(res: dict) -> str:
         parts = [f"{item_name(m['item'])}：需 {m['need']}，现有 {m['have']}" for m in res["missing"]]
         return "材料不足：\n" + "\n".join(parts)
     if s == "accelerated":
-        names = "、".join(c["name"] for c in res["collected"]) or "炉火已催至将成"
+        names = "、".join(_collected_text(c) for c in res["collected"]) or "炉火已催至将成"
         if res.get("cost", 0) <= 0:
             return f"炉火已成，{names}。"
         return f"消耗灵石 {res['cost']} 加速，{names}。"

@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 """法宝长线 sink：强化 / 重铸 / 分解（#13）。
 
 可重复消耗灵石 + 器魂；强化成本随级递增（收益递减）；多余法宝分解为器魂，
 反哺强化/重铸，形成闭环。重铸复用炼器的词条 roll 逻辑。
 """
-from __future__ import annotations
 
 import json
 
@@ -16,16 +17,14 @@ from services.crafting import _roll_affixes
 
 
 async def _get_instance(conn, user_id: int, instance_id: int):
-    cur = await conn.execute(
-        "SELECT * FROM item_instances WHERE id=? AND user_id=?", (instance_id, user_id))
-    row = await cur.fetchone()
-    await cur.close()
-    return row
+    return await character.item_instance_for_action_conn(conn, user_id, instance_id)
 
 
 async def _char_row(conn, user_id: int):
     cur = await conn.execute(
-        "SELECT root_bone, forge_prof, spirit_stone FROM characters WHERE user_id=?", (user_id,))
+        "SELECT root_bone, forge_prof, spirit_stone, natal_instance_id "
+        "FROM characters WHERE user_id=?",
+        (user_id,))
     row = await cur.fetchone()
     await cur.close()
     return row
@@ -66,9 +65,10 @@ async def _charge(conn, user_id: int, cost: dict) -> dict:
 
 async def enhance(user_id: int, instance_id: int) -> dict:
     async with db.transaction() as conn:
-        inst = await _get_instance(conn, user_id, instance_id)
-        if not inst:
-            return {"status": "not_found"}
+        lookup = await _get_instance(conn, user_id, instance_id)
+        if lookup["status"] != "ok":
+            return {"status": lookup["status"]}
+        inst = lookup["instance"]
         if not equipment_slot(inst["base_key"]):
             return {"status": "not_equipment"}
         level = inst["enhance_level"]
@@ -87,9 +87,10 @@ async def enhance(user_id: int, instance_id: int) -> dict:
 
 async def reforge(user_id: int, instance_id: int) -> dict:
     async with db.transaction() as conn:
-        inst = await _get_instance(conn, user_id, instance_id)
-        if not inst:
-            return {"status": "not_found"}
+        lookup = await _get_instance(conn, user_id, instance_id)
+        if lookup["status"] != "ok":
+            return {"status": lookup["status"]}
+        inst = lookup["instance"]
         if not equipment_slot(inst["base_key"]):
             return {"status": "not_equipment"}
         cost = reforge_cost(inst["tier"])
@@ -107,9 +108,10 @@ async def reforge(user_id: int, instance_id: int) -> dict:
 
 async def unequip(user_id: int, instance_id: int) -> dict:
     async with db.transaction() as conn:
-        inst = await _get_instance(conn, user_id, instance_id)
-        if not inst:
-            return {"status": "not_found"}
+        lookup = await _get_instance(conn, user_id, instance_id)
+        if lookup["status"] != "ok":
+            return {"status": lookup["status"]}
+        inst = lookup["instance"]
         if not equipment_slot(inst["base_key"]):
             return {"status": "not_equipment"}
         if not inst["equipped_slot"]:
@@ -122,11 +124,16 @@ async def unequip(user_id: int, instance_id: int) -> dict:
 
 async def decompose(user_id: int, instance_id: int) -> dict:
     async with db.transaction() as conn:
-        inst = await _get_instance(conn, user_id, instance_id)
-        if not inst:
-            return {"status": "not_found"}
+        lookup = await _get_instance(conn, user_id, instance_id)
+        if lookup["status"] != "ok":
+            return {"status": lookup["status"]}
+        inst = lookup["instance"]
         if inst["equipped_slot"]:
             return {"status": "equipped"}
+        char = await _char_row(conn, user_id)
+        natal_id = int(char["natal_instance_id"] or 0) if char else 0
+        if int(inst["bound"] or 0) or int(inst["natal_level"] or 0) or natal_id == int(instance_id):
+            return {"status": "natal_bound"}
         qihun = decompose_yield(inst["tier"], inst["enhance_level"])
         await conn.execute(
             "DELETE FROM item_instances WHERE id=? AND user_id=?", (instance_id, user_id))

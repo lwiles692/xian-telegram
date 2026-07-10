@@ -1,0 +1,26 @@
+"""常规道行来源配置（spec-v2 §4.3，#45）。"""
+from __future__ import annotations
+
+UNLOCK_REALM = 3
+REGULAR_WEEKLY_CAP = 120
+
+EXPLORE_DAOHANG_BY_DIFFICULTY = {
+    "易": 1,
+    "中": 2,
+    "难": 3,
+}
+EXPLORE_BOSS_BONUS = 2
+
+DUNGEON_DAOHANG_PER_LAYER = 2
+DUNGEON_CLEAR_BONUS = 4
+
+WORLD_BOSS_CHALLENGE_DAOHANG = 1
+WORLD_BOSS_RANK_DAOHANG = [8, 5, 3]
+
+CRAFT_DAOHANG_BY_TYPE = {
+    "alchemy": 1,
+    "forge": 1,
+}
+
+SECT_TASK_DAOHANG = 1
+PVP_WEEKLY_DAOHANG_BY_RANK = [12, 9, 6, 4, 2]

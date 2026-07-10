@@ -40,7 +40,7 @@ SQLite auto-created at `data/xian.db` (gitignored). No CI, no Dockerfile, no Mak
 - Service aliasing on name collision: `from services import character as character_service`.
 - Defense stat key is `df` (never `def` — Python keyword). `STAT_KEYS=("hp","mp","atk","df","spd","crit")`.
 - `logging.getLogger("xian.<area>")` for service loggers.
-- Realm index 0..4 = 炼气/筑基/金丹/元婴/化神. Stage indexing per-realm.
+- Realm index 0..5 = 炼气/筑基/金丹/元婴/化神/炼虚. Stage indexing per-realm.
 - Code comments cite `spec §X.Y`, `#NN` (issue), `#AX` (audit) — preserve when editing.
 
 ## DB Layer (models/db.py) — Read First
@@ -65,7 +65,7 @@ SQLite auto-created at `data/xian.db` (gitignored). No CI, no Dockerfile, no Mak
 
 ## Config Conventions (see config/AGENTS.md)
 - Pure data modules: dicts/lists/constants only. No DB, no async, no imports of services/handlers.
-- Numeric tables indexed by realm 0..4.
+- Numeric tables indexed by realm 0..5.
 
 ## Test Conventions (see tests/AGENTS.md)
 - pytest + pytest-asyncio. `@pytest.mark.asyncio` on async tests.

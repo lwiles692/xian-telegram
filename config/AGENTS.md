@@ -6,7 +6,7 @@ Pure data: dicts, lists, constants. No DB, no async, no imports of `services`/`h
 
 | Module | Contents |
 |--------|----------|
-| `realms.py` | `REALM_NAMES` (0..4), `REALM_STAGES`, `STAT_KEYS`, `BIG_BREAKTHROUGH` (pill/rate/tribulation per realm), `_ANCHORS` (stat ranges per realm/stage), `STAMINA_CAP`, `SECLUSION_STAGE_HOURS`. |
+| `realms.py` | `REALM_NAMES` (0..5), `REALM_STAGES`, `STAT_KEYS`, `BIG_BREAKTHROUGH` (pill/rate/tribulation per realm), `_ANCHORS` (stat ranges per realm/stage), `STAMINA_CAP`, `SECLUSION_STAGE_HOURS`. |
 | `items.py` | `ITEMS` dict, `equipment_slot(key)`, `item_name(key)`, `weapon_bonus(key)`. |
 | `equipment.py` | `ENHANCE_PER_LEVEL`, slot/affix tables. |
 | `skills.py` | `SKILLS`, `COMBAT_SLOTS`, `MIND_SLOT`, `STARTER_SKILL`, `STARTER_MIND`, `skill_bonus`, `is_mind_skill`. |
@@ -19,7 +19,7 @@ Pure data: dicts, lists, constants. No DB, no async, no imports of `services`/`h
 | `dao_paths.py` | five 道途 (剑/体/丹/器/符阵), `RANK_NAMES`, rank bonuses. |
 | `ascension.py` | `PASSIVE_CAP`, trial config, 飞升 reward table. |
 | `buffs.py` | buff caps (`ATTACK_PCT_CAP`, `SURVIVAL_PCT_CAP`), buff sources. |
-| `events.py` | `TRIBULATION_ACTIONS` (天劫/神魂劫 choices), random 奇遇 table. |
+| `events.py` | `TRIBULATION_ACTIONS` / `SHENHUN_TRIBULATION_ACTIONS` / `XUKONG_TRIBULATION_ACTIONS`, random 奇遇 table. |
 | `social.py` | social/broadcast rules, reputation caps. |
 | `sects.py` | 宗门 levels, `welfare(level)` fn, donate rewards, mission table. |
 | `sect_war.py` | 据点 outpost defs, scoring weights, season rewards. |
@@ -29,7 +29,7 @@ Pure data: dicts, lists, constants. No DB, no async, no imports of `services`/`h
 ## Conventions
 - `from __future__ import annotations` first line.
 - Module-level constants UPPER_SNAKE; lookup helpers `snake_case(key)`.
-- Numeric tables indexed by realm `0..4` (炼气/筑基/金丹/元婴/化神) unless stated.
+- Numeric tables indexed by realm `0..5` (炼气/筑基/金丹/元婴/化神/炼虚) unless stated.
 - Stat keys: `("hp","mp","atk","df","spd","crit")` — `df` not `def`.
 - Tuning comments cite `spec §X.Y`, `#NN`, `#AX`. Preserve.
 

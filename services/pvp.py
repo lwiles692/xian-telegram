@@ -4,6 +4,7 @@ from __future__ import annotations
 import random
 import time
 
+from config import daohang as DAOHANG
 from services import character
 from services import game_events, social
 from services.combat import CombatRules, Combatant, simulate
@@ -307,8 +308,13 @@ async def settle_weekly(now: int = None, pool: int = WEEKLY_POOL_STONE) -> list:
                 await conn.execute(
                     "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
                     (stone, row["user_id"]))
+            amount = (DAOHANG.PVP_WEEKLY_DAOHANG_BY_RANK[idx]
+                      if idx < len(DAOHANG.PVP_WEEKLY_DAOHANG_BY_RANK) else 0)
+            daohang = await character.grant_regular_daohang_conn(
+                conn, row["user_id"], amount, "pvp_weekly", now)
             results.append({"user_id": row["user_id"], "rank": idx + 1,
-                            "stone": stone, "reputation": row["week_reputation"]})
+                            "stone": stone, "reputation": row["week_reputation"],
+                            "daohang": daohang})
         await conn.execute(
             "UPDATE pvp_ratings SET week_reputation=0 WHERE week_tag=?", (week,))
     return results

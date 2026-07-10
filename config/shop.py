@@ -43,7 +43,7 @@ def goods_for_realm(realm: int):
 
 # 灵石买精力（#16）：按境界基价 + 当日第 n 次翻倍递增 + 每日封顶，
 # 让首买单价就高于当前最佳内容的灵石/精力产出，堵死 灵石→精力→刷钱 套利。
-STAMINA_BUY_BASE = {0: 120, 1: 260, 2: 600, 3: 1200, 4: 2800}
+STAMINA_BUY_BASE = {0: 120, 1: 260, 2: 600, 3: 1200, 4: 2800, 5: 6000}
 STAMINA_BUY_DAILY_LIMIT = 3
 STAMINA_BUY_GAIN = 20
 

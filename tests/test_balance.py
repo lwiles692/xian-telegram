@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """数值平衡回归测试(#15)。
 
 基于 tools.balance_sim(纯函数、固定 seed → 确定值)。覆盖入门/中期/圆满
@@ -8,10 +10,12 @@
 小怪单场必胜(可参与新图)、连战可刷;秘境入门能推进半数以上层数,
 个别档位可接近通关;Boss 入门打不动、本境界中后期能过。
 """
+from config import buffs as BUFFS
+from config import dao_paths as DAO
 from config import realms as R
 from tools import balance_sim as B
 
-MAP_OF = {1: "妖兽森林", 2: "万妖岭", 3: "上古战场", 4: "星陨海"}   # 各境界「易」档(向后兼容旧断言)
+MAP_OF = {1: "妖兽森林", 2: "万妖岭", 3: "上古战场", 4: "星陨海", 5: "太初雾泽"}   # 各境界「易」档
 DGN_OF = {1: "xuanming", 2: "qingyun", 3: "tianxu"}
 
 # 各大境界 (易, 中, 难) 三档地图(#20)。
@@ -21,6 +25,7 @@ TIERS = {
     2: ("万妖岭", "碧毒蛟潭", "九霄雷泽"),
     3: ("上古战场", "归墟裂谷", "天魔古原"),
     4: ("星陨海", "幽都裂隙", "天外古墟"),
+    5: ("太初雾泽", "虚空裂海", "混沌古狱"),
 }
 
 
@@ -28,7 +33,7 @@ TIERS = {
 
 def test_seclusion_stage_seconds_increases_with_realm():
     secs = [R.seclusion_stage_seconds(r) for r in range(len(R.REALM_NAMES))]
-    assert secs == [16 * 3600, 24 * 3600, 36 * 3600, 48 * 3600, 96 * 3600]
+    assert secs == [16 * 3600, 24 * 3600, 36 * 3600, 48 * 3600, 96 * 3600, 720 * 3600]
     assert secs == sorted(secs)  # 越高境界每小阶越慢,抵消"小阶少→偏快"
 
 
@@ -87,7 +92,7 @@ def test_forge_craft_seconds_make_acceleration_meaningful():
 # ---- 刚突破即可参与新图普通内容(#15-2/3,核心验收) ----
 
 def test_entry_small_mobs_are_farmable():
-    for r in (1, 2, 3, 4):
+    for r in (1, 2, 3, 4, 5):
         mob, _ = B.map_winrates(r, 0, MAP_OF[r])
         assert mob >= 0.99, f"r{r} 刚解锁小怪单场胜率过低: {mob:.2f}"
         run = B.map_run_winrate(r, 0, MAP_OF[r])
@@ -95,7 +100,7 @@ def test_entry_small_mobs_are_farmable():
 
 
 def test_full_realm_small_mobs_trivial():
-    for r in (1, 2, 3, 4):
+    for r in (1, 2, 3, 4, 5):
         last = R.num_stages(r) - 1
         assert B.map_run_winrate(r, last, MAP_OF[r]) >= 0.98
 
@@ -155,7 +160,7 @@ def test_world_boss_total_hp_scaled_not_one_shot():
 
 def test_each_realm_has_three_difficulty_maps():
     from config.maps import maps_at_realm
-    for r in range(len(R.REALM_NAMES)):
+    for r in sorted(TIERS):
         assert [m["difficulty"] for _, m in maps_at_realm(r)] == ["易", "中", "难"]
 
 
@@ -180,7 +185,7 @@ def test_hard_maps_have_exclusive_drops():
 
 def test_hard_maps_riskier_than_easy_at_entry():
     # 同境界刚解锁时,难图连战胜率应明显低于易图(高风险)。
-    for r in (1, 2, 3, 4):
+    for r in (1, 2, 3, 4, 5):
         easy, _mid, hard = TIERS[r]
         assert B.map_run_winrate(r, 0, hard) < B.map_run_winrate(r, 0, easy)
 
@@ -223,6 +228,52 @@ def test_yuanying_full_buff_cannot_farm_huashen_mid_hard_bosses():
         boss = MAPS[map_key]["boss"]
         wr = B.winrate(3, last, boss, profile=B.YUANYING_FULL_BUFF, n=200)
         assert wr < 0.05, f"{map_key} Boss 被元婴满 buff 刷穿：胜率 {wr:.2%}"
+
+
+def test_huashen_full_buff_profiles_include_m0_sources():
+    """spec-v3 M0 T0.2：化神满 buff 档必须含满道途、满淬炼、飞升被动。"""
+    for profile, path_key in (
+            (B.HUASHEN_FULL_BUFF_ATK, "sword"),
+            (B.HUASHEN_FULL_BUFF_SURV, "body"),
+    ):
+        assert profile["dao_path"] == path_key
+        assert profile["dao_rank"] == len(DAO.RANK_NAMES) - 1
+        assert profile["dao_refine"] == DAO.REFINE_MAX_LEVEL
+        assert B.ascension_passive_bonuses(profile) == {
+            "hp_pct": 0.05,
+            "atk_pct": 0.05,
+            "df_pct": 0.05,
+            "seclusion_pct": 0.05,
+        }
+    assert B.seclusion_efficiency(B.HUASHEN_FULL_BUFF_SURV) > 1.0
+
+
+def test_huashen_full_buff_profiles_reach_clamp_ceiling():
+    """spec-v3 M0 T0.2：攻击/生存极端档推到全局百分比合算上限。"""
+    last = R.num_stages(4) - 1
+    atk = B.build_player_stats(4, last, B.HUASHEN_FULL_BUFF_ATK)
+    surv = B.build_player_stats(4, last, B.HUASHEN_FULL_BUFF_SURV)
+    atk_cap = B.build_player_stats(
+        4, last,
+        {**B.HUASHEN_GEARED, "extra_pct": {
+            "atk": BUFFS.ATTACK_PCT_CAP * 2,
+            "crit": BUFFS.ATTACK_PCT_CAP * 2,
+        }})
+    surv_cap = B.build_player_stats(
+        4, last,
+        {**B.HUASHEN_GEARED, "extra_pct": {
+            "hp": BUFFS.SURVIVAL_PCT_CAP * 2,
+            "df": BUFFS.SURVIVAL_PCT_CAP * 2,
+        }})
+
+    assert atk["atk"] == atk_cap["atk"]
+    assert atk["crit"] == atk_cap["crit"]
+    assert surv["hp"] == surv_cap["hp"]
+    assert surv["df"] == surv_cap["df"]
+    assert B.boss_damage_per_challenge(4, 2, "huashen", profile=B.HUASHEN_FULL_BUFF_ATK, n=80) > (
+        B.boss_damage_per_challenge(4, 2, "huashen", profile=B.HUASHEN_FULL_BUFF_SURV, n=80))
+    assert surv["hp"] > atk["hp"]
+    assert surv["df"] > atk["df"]
 
 
 def test_yuanying_treasure_gear_fills_mid_map_gap_without_entry_boss_break():
@@ -278,6 +329,127 @@ def test_huashen_maps_keep_stone_margin_below_stamina_buy():
         assert yield_per < cap, f"{key} 产出 {yield_per:.1f} 灵石/精力 未低于化神首买 75%({cap:.1f})"
 
 
+def test_lianxu_maps_config_and_duration_ranges():
+    from config.maps import MAPS
+    from services import explore
+
+    expected = {
+        "太初雾泽": {"stamina": 20, "minutes": (15, 18), "drop": "雾泽虚砂"},
+        "虚空裂海": {"stamina": 24, "minutes": (18, 22), "drop": "裂海空髓"},
+        "混沌古狱": {"stamina": 28, "minutes": (22, 26), "drop": "混沌残核"},
+    }
+    for key, cfg in expected.items():
+        m = MAPS[key]
+        assert m["realm"] == 5
+        assert m["stamina"] == cfg["stamina"]
+        assert m["minutes"] == cfg["minutes"]
+        assert cfg["drop"] in {drop[0] for drop in m["drops"]}
+    assert explore._plan_minutes(MAPS["太初雾泽"], False, 1) == 16.5
+    assert explore._plan_minutes(MAPS["虚空裂海"], False, 1) == 18
+    assert explore._plan_minutes(MAPS["虚空裂海"], False, 2) == 22
+    assert explore._plan_minutes(MAPS["混沌古狱"], True, 2) == 26
+
+
+def test_lianxu_geared_hits_map_gates():
+    """spec-v3 M1 T1.4：炼虚门槛按炼虚装备档回归验收。"""
+    from config.maps import MAPS
+
+    profile = B.LIANXU_GEARED
+    assert B.map_run_winrate(5, 0, "太初雾泽", profile=profile, n=120) >= 0.95
+    assert B.map_run_winrate(5, 0, "虚空裂海", profile=profile, n=120) >= 0.65
+    assert B.winrate(5, 0, MAPS["虚空裂海"]["boss"], profile=profile, n=120) < 0.05
+    assert B.map_run_winrate(5, 0, "混沌古狱", profile=profile, n=120) < 0.05
+    assert B.winrate(5, 1, MAPS["虚空裂海"]["boss"], profile=profile, n=120) >= 0.85
+    assert B.winrate(5, 1, MAPS["混沌古狱"]["boss"], profile=profile, n=120) < 0.05
+    assert B.winrate(5, 2, MAPS["混沌古狱"]["boss"], profile=profile, n=120) >= 0.85
+    assert B.map_run_winrate(5, R.num_stages(5) - 1, "混沌古狱", profile=profile, n=120) >= 0.95
+
+
+def test_huashen_full_buff_cannot_break_lianxu_boss_gates():
+    """spec-v3 §3.5：化神满 buff 可摸新图，但炼虚中/难图 Boss 仍不得被打穿。"""
+    from config.maps import MAPS
+
+    for profile in (B.HUASHEN_FULL_BUFF_ATK, B.HUASHEN_FULL_BUFF_SURV):
+        assert B.winrate(4, R.num_stages(4) - 1, MAPS["虚空裂海"]["boss"], profile=profile, n=120) < 0.05
+        assert B.winrate(4, R.num_stages(4) - 1, MAPS["混沌古狱"]["boss"], profile=profile, n=120) < 0.05
+        assert B.map_run_winrate(4, R.num_stages(4) - 1, "混沌古狱", profile=profile, n=120) < 0.05
+
+
+def test_lianxu_maps_keep_stone_margin_below_stamina_buy():
+    from services import shop
+
+    cap = shop.first_buy_cost_per_stamina(5) * 0.75
+    for key in TIERS[5]:
+        yield_per = B.map_stone_per_stamina(key)
+        assert yield_per < cap, f"{key} 产出 {yield_per:.1f} 灵石/精力 未低于炼虚首买 75%({cap:.1f})"
+
+
+def test_huashen_full_buff_lianxu_transition_is_low_efficiency():
+    """spec-v3 T0.11：化神满 buff 可磨炼虚中图普通怪，但收益须低于易图。"""
+    last = R.num_stages(4) - 1
+    profiles = (B.HUASHEN_FULL_BUFF_ATK, B.HUASHEN_FULL_BUFF_SURV)
+
+    for profile in profiles:
+        assert B.map_run_winrate(4, last, "太初雾泽", profile=profile, n=120) >= 0.95
+
+    transition_rates = [
+        (B.map_run_winrate(4, last, "虚空裂海", profile=profile, n=120), profile)
+        for profile in profiles
+    ]
+    transition, transition_profile = max(transition_rates, key=lambda item: item[0])
+    easy_eff = B.effective_map_cult_per_stamina(4, last, "太初雾泽", profile=transition_profile, n=120)
+    mid_eff = B.effective_map_cult_per_stamina(4, last, "虚空裂海", profile=transition_profile, n=120)
+
+    assert 0.15 <= transition <= 0.65
+    assert 0 < mid_eff < easy_eff
+
+
+def test_lianxu_maps_are_better_growth_route_than_huashen_maps():
+    """spec-v3 T0.11：炼虚圆满碾压化神内容，但成长路线应转向炼虚图。"""
+    from config.maps import MAPS
+
+    last = R.num_stages(5) - 1
+    assert B.map_run_winrate(5, last, "天外古墟", profile=B.LIANXU_GEARED, n=120) >= 0.98
+    best_huashen = max(MAPS[key]["cult"] / MAPS[key]["stamina"] for key in TIERS[4])
+    weakest_lianxu = min(MAPS[key]["cult"] / MAPS[key]["stamina"] for key in TIERS[5])
+    assert weakest_lianxu > best_huashen
+
+
+def test_lianxu_progression_profile_hits_weeks_target():
+    """spec-v3 T0.11：普通活跃 6~9 周，高活跃不低于 4 周且更快。"""
+    profile = B.lianxu_progression_profile()
+    ordinary_days = profile["ordinary"]["total_days"]
+    high_days = profile["high"]["total_days"]
+
+    assert 42 <= ordinary_days <= 63
+    assert 28 <= high_days < ordinary_days
+
+
+def test_lianxu_first_breakthrough_profile_hits_cycle_targets():
+    """spec-v3 T0.11：首枚炼虚丹 2~4 周，期望进炼虚 4~6 周。"""
+    profile = B.lianxu_first_breakthrough_profile()
+
+    assert profile["huashen_accessible"] is True
+    assert all(source["realm"] <= 4 for source in profile["sources"])
+    assert 14 <= profile["first_pill_days"] <= 28
+    assert 28 <= profile["entry_days"] <= 42
+    assert 1.8 <= profile["expected_attempts"] <= 2.0
+
+
+def test_m0_lianxu_economy_profiles_cover_two_player_states():
+    """spec-v3 T0.11：存量化神余粮档与新进化神现刷档都不能靠买精力套利。"""
+    econ = B.m0_lianxu_economy_profiles()
+    stored = econ["stored_lianxu"]
+    new = econ["new_huashen"]
+
+    assert stored["stamina_cap"] == R.STAMINA_CAP[5]
+    assert stored["max_value"] < stored["value_cap"]
+    assert all(value < stored["value_cap"] for value in stored["map_values"].values())
+    assert new["stamina_cap"] == R.STAMINA_CAP[4]
+    assert new["daily_stamina"] <= new["stamina_cap"]
+    assert new["route_value"] < new["value_cap"]
+
+
 # ---- C1: 坊市/活动/飞升产出进反套利校验（spec DoD #3）----
 
 def test_all_realms_content_value_including_drops_under_first_buy():
@@ -291,6 +463,50 @@ def test_all_realms_content_value_including_drops_under_first_buy():
         value = B.best_content_value_per_stamina(r)
         assert value < cost, (
             f"r{r} 含掉落产出 {value:.1f} 未低于首买 {cost:.1f}，反套利红线失守")
+
+
+def test_auction_whitelist_material_values_stay_under_buy_margin():
+    """spec-v3 T1.5：白名单材料按玩家市场估值后，仍不得打穿买精力刷钱红线。"""
+    from services import shop
+
+    assert {"天外残玉", "雾泽虚砂", "裂海空髓", "混沌残核"} <= B.AUCTION_WHITELIST_MATERIALS
+    assert B.AUCTION_WHITELIST_REALMS == (4, 5)
+    for r in B.AUCTION_WHITELIST_REALMS:
+        cap = shop.first_buy_cost_per_stamina(r) * 0.75
+        value = B.best_content_market_value_per_stamina(r)
+        assert value < cap, (
+            f"r{r} 白名单折算产出 {value:.1f} 未低于首买75%红线 {cap:.1f}")
+
+
+def test_lianxu_daily_loop_stamina_and_market_value_are_self_consistent():
+    """spec-v3 M1 DoD：三图+虚空神殿×2+炼虚Boss的日常精力与白名单材料价值自洽。"""
+    profile = B.lianxu_daily_loop_profile()
+
+    assert profile["daily_stamina"] == (
+        sum(B.MAPS[key]["stamina"] for key in ("太初雾泽", "虚空裂海", "混沌古狱"))
+        + B.DUNGEONS["xukong"]["stamina"] * 2
+        + B.WORLD_BOSSES["lianxu"]["stamina"]
+    )
+    assert profile["daily_stamina"] <= profile["stamina_cap"]
+    assert profile["max_repeatable_value"] < profile["value_cap"]
+    assert profile["max_daily_value"] < profile["value_cap"]
+
+
+def test_natal_feed_sink_covers_lianxu_materials_and_forge_discount():
+    """spec-v3 M5 DoD：本命喂养显式消耗炼虚材料，并只给器修降耗不提上限。"""
+    profile = B.natal_feed_sink_profile()
+
+    assert profile["levels"] == tuple(range(2, B.NATAL.MAX_LEVEL + 1))
+    assert profile["standard_stone"] == 252_000
+    assert profile["forge_stone"] == 226_800
+    assert profile["standard_items"]["器魂"] == 70
+    assert profile["forge_items"]["器魂"] == 61
+    assert profile["forge_stone_discount"] == 25_200
+    assert profile["forge_qihun_discount"] == 9
+    assert profile["lianxu_items"] == {"雾泽虚砂": 3, "裂海空髓": 3, "混沌残核": 3}
+    assert profile["all_lianxu_sources_available"] is True
+    for key in B.NATAL_LIANXU_SINK_MATERIALS:
+        assert profile["sources"][key], key
 
 
 def test_dungeon_value_subtracts_entry_and_keeps_drops_unscaled():
@@ -308,6 +524,16 @@ def test_activity_daohang_capped():
     assert prof["capped"] is True
     assert prof["weekly_cap"] > 0
     assert prof["runs_to_cap"] >= 1
+
+
+def test_regular_daohang_sources_do_not_bypass_activity_cap():
+    """#45：常规道行来源为小额补给，共用周上限且低于活动副本上限。"""
+    prof = B.regular_daohang_profile()
+    assert prof["unlock_realm"] == 3
+    assert prof["under_activity_cap"] is True
+    assert prof["weekly_cap"] <= B.activity_daohang_profile()["weekly_cap"]
+    assert prof["max_explore"] < prof["weekly_cap"]
+    assert prof["max_dungeon"] < prof["weekly_cap"]
 
 
 def test_ascension_passive_within_clamp_and_nontradeable():

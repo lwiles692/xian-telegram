@@ -1,14 +1,16 @@
-"""宗门系统（spec §11）。"""
 from __future__ import annotations
+
+"""宗门系统（spec §11）。"""
 
 import time
 
+from config import daohang as DAOHANG
 from config.items import item_name
 from config.sects import (CREATE_REALM, CREATE_STONE_COST, DONATE_DAILY_CONTRIBUTION_CAP,
                           DONATE_STONE_PER_CONTRIBUTION, SECT_SHOP, TASK_CONTRIBUTION,
                           TASK_STONE_REWARD, upgrade_cost, upgrade_stone_cost)
 from models import db
-from services import game_events
+from services import character, game_events
 
 
 def _day(ts: int) -> str:
@@ -60,6 +62,9 @@ async def create(user_id: int, name: str, now: int = None) -> dict:
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
             (CREATE_STONE_COST, user_id))
+        await game_events.emit_conn(
+            conn, user_id, "sect.join",
+            {"sect": name, "role": "宗主", "amount": 1}, now)
         return {"status": "ok", "name": name}
 
 
@@ -80,6 +85,9 @@ async def join(user_id: int, name: str, now: int = None) -> dict:
             "INSERT INTO sect_members(sect_id, user_id, role, contribution, joined_at) "
             "VALUES(?,?, '弟子', 0, ?)",
             (sect_row["id"], user_id, now))
+        await game_events.emit_conn(
+            conn, user_id, "sect.join",
+            {"sect": sect_row["name"], "role": "弟子", "amount": 1}, now)
         return {"status": "ok", "name": sect_row["name"]}
 
 
@@ -128,7 +136,10 @@ async def task(user_id: int, now: int = None) -> dict:
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
             (TASK_STONE_REWARD, user_id))
-        return {"status": "ok", "contribution": TASK_CONTRIBUTION, "stone": TASK_STONE_REWARD}
+        daohang = await character.grant_regular_daohang_conn(
+            conn, user_id, DAOHANG.SECT_TASK_DAOHANG, "sect_task", now)
+        return {"status": "ok", "contribution": TASK_CONTRIBUTION,
+                "stone": TASK_STONE_REWARD, "daohang": daohang}
 
 
 async def redeem(user_id: int, item_key: str) -> dict:
