@@ -13,10 +13,22 @@ from config.items import item_name
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
                              button_grid, consume_action_callback,
                              guard_private_callback, guard_private_message,
-                             section_back_markup, show)
+                             is_private_chat, section_back_markup, show)
 from services import bonds as bonds_service, character, communion
 
 router = Router()
+
+_MASTER_CALLBACK_OPS = frozenset({
+    "create", "confirm", "decline", "dissolve", "transfer", "graduate",
+})
+
+
+def _is_master_callback(data: str | None) -> bool:
+    if not data or not data.startswith("bond:"):
+        return False
+    action = data.rsplit(":", 1)[0]
+    parts = action.split(":")
+    return len(parts) > 1 and parts[1] in _MASTER_CALLBACK_OPS
 
 
 def _fmt_time(ts: int | None) -> str:
@@ -345,8 +357,6 @@ def _result_text(res: dict) -> str:
 
 @router.message(Command("master"))
 async def cmd_master(message: Message):
-    if await guard_private_message(message):
-        return
     parts = message.text.split()
     if len(parts) == 3 and parts[1] in {"拜师", "收徒"} and parts[2].isdigit():
         text, markup = await render_request_confirm(message.from_user.id, parts[1], int(parts[2]))
@@ -371,8 +381,6 @@ async def cmd_partner(message: Message):
 
 @router.callback_query(F.data == "nav:master")
 async def cb_master(callback: CallbackQuery):
-    if await guard_private_callback(callback):
-        return
     text, markup = await render_master(callback.from_user.id)
     await show(callback, text, markup)
     await callback.answer()
@@ -396,8 +404,10 @@ def _action_back_markup(op: str) -> InlineKeyboardMarkup:
 
 @router.callback_query(F.data.startswith("bond:"))
 async def cb_bond_action(callback: CallbackQuery):
-    if await guard_private_callback(callback):
-        return
+    if (callback.message and not is_private_chat(callback.message.chat)
+            and not _is_master_callback(callback.data)):
+        if await guard_private_callback(callback):
+            return
     action = await consume_action_callback(callback)
     if not action or not action.startswith("bond:"):
         return

@@ -117,13 +117,13 @@ async def _激活道侣(a_id: int, b_id: int, now: int) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_master_群内入口被私聊护法拦下(temp_db):
+async def test_master_群内入口可展示师徒页面(temp_db):
+    await character.create(7001, "群内道友")
     msg = _Message(7001, "/master", chat_type="group")
 
     await bonds_handler.cmd_master(msg)
 
-    assert msg.answers
-    assert "养成诸事请移步私聊" in msg.answers[0][0]
+    assert msg.answers and msg.answers[0][1] is not None
 
 
 @pytest.mark.asyncio
@@ -224,7 +224,7 @@ async def test_master_收徒确认与拜师成立播报走一次性令牌(temp_d
 
     _text, markup = await bonds_handler.render_request_confirm(mentor_id, "收徒", disciple_id)
     create_data = next(data for data in _datas(markup) if data.startswith("bond:create:"))
-    created = _Callback(mentor_id, create_data)
+    created = _Callback(mentor_id, create_data, chat_type="group")
     await bonds_handler.cb_bond_action(created)
     pending = await db.fetchone("SELECT * FROM social_bonds WHERE a_id=? AND b_id=?",
                                 (mentor_id, disciple_id))
@@ -232,13 +232,13 @@ async def test_master_收徒确认与拜师成立播报走一次性令牌(temp_d
     assert "拜师帖已递出" in created.message.edits[-1][0]
 
     # 同一 token 再用会被 consume_action_callback 拦截。
-    again = _Callback(mentor_id, create_data)
+    again = _Callback(mentor_id, create_data, chat_type="group")
     await bonds_handler.cb_bond_action(again)
     assert again.answers and again.answers[0][1] is True
 
     text, markup = await bonds_handler.render_master(disciple_id)
     confirm_data = next(data for data in _datas(markup) if data.startswith("bond:confirm:"))
-    confirmed = _Callback(disciple_id, confirm_data)
+    confirmed = _Callback(disciple_id, confirm_data, chat_type="group")
     await bonds_handler.cb_bond_action(confirmed)
     active = await db.fetchone("SELECT status FROM social_bonds WHERE id=?", (pending["id"],))
     broadcasts = await db.fetchall(
