@@ -444,12 +444,29 @@ ON communion_sessions(status, a_id, b_id);
 CREATE INDEX IF NOT EXISTS idx_communion_sessions_expire
 ON communion_sessions(status, expires_at);
 CREATE TABLE IF NOT EXISTS ascension (
-    user_id     INTEGER PRIMARY KEY,
-    level       INTEGER NOT NULL DEFAULT 0,
-    points      INTEGER NOT NULL DEFAULT 0,
-    spent_json  TEXT NOT NULL DEFAULT '{}',
-    updated_at  INTEGER NOT NULL
+    user_id                INTEGER PRIMARY KEY,
+    level                  INTEGER NOT NULL DEFAULT 0,
+    points                 INTEGER NOT NULL DEFAULT 0,
+    spent_json             TEXT NOT NULL DEFAULT '{}',
+    updated_at             INTEGER NOT NULL,
+    last_trial_week        TEXT,
+    overflow_remainder     INTEGER NOT NULL DEFAULT 0,
+    overflow_week          TEXT,
+    overflow_week_points   INTEGER NOT NULL DEFAULT 0,
+    tianmen_level          INTEGER NOT NULL DEFAULT 0,
+    tianmen_progress       INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS ascension_events (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL,
+    source         TEXT NOT NULL,
+    points_delta   INTEGER NOT NULL,
+    balance_after  INTEGER NOT NULL,
+    meta_json      TEXT NOT NULL DEFAULT '{}',
+    created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ascension_events_user_time
+ON ascension_events(user_id, created_at, id);
 CREATE TABLE IF NOT EXISTS weekly_activity (
     user_id     INTEGER NOT NULL,
     week        TEXT NOT NULL,
@@ -663,6 +680,11 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "dungeon_jobs", "start_hp", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "start_mp", "INTEGER")
     await _ensure_column(_conn, "ascension", "last_trial_week", "TEXT")
+    await _ensure_column(_conn, "ascension", "overflow_remainder", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "ascension", "overflow_week", "TEXT")
+    await _ensure_column(_conn, "ascension", "overflow_week_points", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "ascension", "tianmen_level", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "ascension", "tianmen_progress", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "tribulation_sessions", "guarantee_bonus", "REAL NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "tribulation_sessions", "reward_flag", "TEXT")
     await _migrate_inventory_bound(_conn)

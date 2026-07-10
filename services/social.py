@@ -140,6 +140,11 @@ def _group_text(event_type: str, payload: dict) -> str:
         title = payload.get("title") or ""
         tail = f"，尊号「{title}」传开" if title else ""
         return f"🌌 {name} 飞升精进，「{passive}」圆满{tail}。"
+    if event_type == "ascension.tianmen":
+        level = int(payload.get("level") or 0)
+        title = payload.get("title") or ""
+        tail = f"，得称「{title}」" if title else ""
+        return f"🌌 {name} 叩问天门，连开至第 {level} 重{tail}。"
     if event_type == "mentor.active":
         disciple = payload.get("disciple_name", "徒弟")
         return f"🤝 {name} 收「{disciple}」为入室弟子，传承香火自此相续。"

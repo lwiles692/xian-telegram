@@ -20,10 +20,8 @@ CULTIVATION_SCALE = 1_000_000
 DAOHANG_FULL_REALM_RATE = 0.08
 DAOHANG_PRE_CAP_RATE = 0.03
 # 溢出转道行的每周入账上限（跨顶点/次顶点圆满共用）。飞升点分支不在此约束内——它已被
-# 「每周一次试炼 + 被动硬上限」双重锁死，不是水管问题。
+# 独立的「每十万修为凝一点 + 每周 14 点」规则约束。
 OVERFLOW_DAOHANG_WEEKLY_CAP = 600
-# 当前最高大境界圆满溢出修为额外转飞升点（M3）；受下游周试炼与被动硬上限约束，故转化率保持不变。
-ASCENSION_FULL_REALM_RATE = 0.20
 # 道侣双修：只对重叠闭关秒数追加小幅闭关乘区，仍受调用方 SECLUSION clamp 截断。
 PARTNER_SECLUSION_PCT = 0.05
 
@@ -42,10 +40,10 @@ def overflow_tier(realm: int, stage: int, now: int = None,
 
 def overflow_split(realm: int, stage: int, cur_cult: int, gain: int,
                    now: int = None, grace_until: int = 0) -> tuple[int, int, int]:
-    """满级/准满级溢出修为分流，返回 (保留修为, 道行, 飞升点)。
+    """满级/准满级溢出修为分流，返回 (保留修为, 道行, 可凝点溢出修为)。
 
-    - 当前最高大境界圆满：cultivation 封顶 advance_cost；越界 ×DAOHANG_FULL_REALM_RATE(0.08)→道行、
-      ×ASCENSION_FULL_REALM_RATE(0.20)→飞升点。
+    - 当前最高大境界圆满：cultivation 封顶 advance_cost；越界 ×DAOHANG_FULL_REALM_RATE(0.08)→道行，
+      全部越界修为交由飞升服务按定额、零头与周上限凝点。
     - 最高境界前一档圆满且仍在宽限期：临时按当前最高大境界圆满完整分流。
     - 最高境界前一档圆满且修为已满：越界 ×DAOHANG_PRE_CAP_RATE(0.03)→道行，不产飞升点。
     - 其它：原样累加，无转换。
@@ -59,8 +57,7 @@ def overflow_split(realm: int, stage: int, cur_cult: int, gain: int,
     if tier in {"full", "grace_full"}:
         cap = R.advance_cost(realm, stage)
         overflow = max(0, total - cap)
-        return (min(total, cap), int(overflow * DAOHANG_FULL_REALM_RATE),
-                int(overflow * ASCENSION_FULL_REALM_RATE))
+        return min(total, cap), int(overflow * DAOHANG_FULL_REALM_RATE), overflow
     if tier == "pre_cap":
         cap = R.advance_cost(realm, stage)
         if cur_cult >= cap:

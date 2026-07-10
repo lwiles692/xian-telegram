@@ -406,7 +406,9 @@ async def _distribute(conn, boss_id: int, cfg: dict, now: int = None):
         asc_points = 0
         if cfg.get("realm") == ASC_CFG.BOSS_ASCENSION_REALM and idx < len(ASC_CFG.BOSS_RANK_POINTS):
             asc_points = ASC_CFG.BOSS_RANK_POINTS[idx]
-            await ascension.add_points_conn(conn, row["user_id"], asc_points)
+            await ascension.add_points_conn(
+                conn, row["user_id"], asc_points, now,
+                source="world_boss", meta={"rank": idx + 1, "boss_id": boss_id})
         daohang = 0
         if idx < len(DAOHANG.WORLD_BOSS_RANK_DAOHANG):
             daohang = await character.grant_regular_daohang_conn(

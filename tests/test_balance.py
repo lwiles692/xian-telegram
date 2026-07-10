@@ -537,8 +537,10 @@ def test_regular_daohang_sources_do_not_bypass_activity_cap():
 
 
 def test_ascension_passive_within_clamp_and_nontradeable():
-    """飞升被动增益受 §6.3 clamp；飞升点非物品、不可交易。"""
+    """飞升凝点有周限，被动受 §6.3 clamp，且飞升点不可交易。"""
     guard = B.ascension_arbitrage_guard()
+    assert guard["overflow_cultivation_per_point"] == 100_000
+    assert guard["overflow_weekly_cap"] == 14
     assert guard["within_clamp"] is True
     assert guard["tradeable_violations"] == []
 

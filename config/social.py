@@ -12,6 +12,7 @@ DAILY_LIMITS = {
     "sect.upgrade": 2,
     "ascension.trial": 2,
     "ascension.upgrade": 2,
+    "ascension.tianmen": 2,
     "mentor.active": 2,
     "mentor.milestone": 2,
     "mentor.graduate": 2,

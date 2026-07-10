@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 
 from config import bonds as BOND_CFG
+from config import ascension as ASC_CFG
 from config import daohang as DAOHANG
 from config import realms as R
 from config import buffs as BUFFS
@@ -218,16 +219,20 @@ async def _settle_seclusion_session_conn(conn, user_id: int, row, start_at: int,
         partner_pct=partner["partner_pct"])
     _set_seclusion_remainder(state, row["realm"], row["stage"], remainder_units)
     grace_until = await _overflow_grace_until_conn(conn)
-    new_cult, daohang, asc_pts = settle.overflow_split(
+    new_cult, daohang, asc_overflow = settle.overflow_split(
         row["realm"], row["stage"], row["cultivation"], gained,
         now=now, grace_until=grace_until)
     daohang = await _cap_overflow_daohang(conn, user_id, daohang, now)
     await _add_daohang_event(conn, user_id, daohang, "overflow", now)
-    if asc_pts:
-        await ascension.add_points_conn(conn, user_id, asc_pts, now)
+    asc_state = None
+    if asc_overflow:
+        asc_state = await ascension.add_overflow_points_conn(
+            conn, user_id, asc_overflow, now)
     overflow = _overflow_status_payload(
         row["realm"], row["stage"], new_cult, now, grace_until)
-    return {"gained": gained, "daohang": daohang, "ascension": asc_pts,
+    return {"gained": gained, "daohang": daohang,
+            "ascension": asc_state["points"] if asc_state else 0,
+            "ascension_state": asc_state,
             "cultivation": new_cult, "state": state, "grace_until": grace_until,
             "overflow": overflow, "settle_start": settle_start, "settle_end": settle_end,
             "seclusion_pct": seclusion_bonus["applied_pct"] + partner["partner_pct"],
@@ -341,7 +346,8 @@ def overflow_grace_notice_text(grace_until: int) -> str:
     return (
         f"宽限截止日期：{_time_text(grace_until)}。\n"
         "降档后档位：化神圆满未突破者为次顶点档（3% 道行 / 0 飞升点）。\n"
-        "突破炼虚并修至炼虚圆满，可恢复完整分流（8% 道行 / 20% 飞升点）。"
+        "突破炼虚并修至炼虚圆满，可恢复完整分流（8% 道行 / "
+        "每十万溢出修为凝 1 飞升点，每周最多 14 点）。"
     )
 
 
@@ -356,25 +362,34 @@ def _overflow_status_payload(realm: int, stage: int, cultivation: int,
     if tier != "none" and int(cultivation or 0) < cost:
         tier = "none"
     rates = {
-        "full": (settle.DAOHANG_FULL_REALM_RATE, settle.ASCENSION_FULL_REALM_RATE),
-        "grace_full": (settle.DAOHANG_FULL_REALM_RATE, settle.ASCENSION_FULL_REALM_RATE),
-        "pre_cap": (settle.DAOHANG_PRE_CAP_RATE, 0.0),
+        "full": settle.DAOHANG_FULL_REALM_RATE,
+        "grace_full": settle.DAOHANG_FULL_REALM_RATE,
+        "pre_cap": settle.DAOHANG_PRE_CAP_RATE,
     }
     if tier == "none":
         return {"status": "none", "active": False, "label": "",
-                "daohang_rate": 0.0, "ascension_rate": 0.0, "grace_until": grace_until}
-    daohang_rate, ascension_rate = rates[tier]
+                "daohang_rate": 0.0, "ascension_rate": 0.0,
+                "ascension_cultivation_per_point": ASC_CFG.OVERFLOW_CULTIVATION_PER_POINT,
+                "ascension_weekly_cap": ASC_CFG.OVERFLOW_WEEKLY_CAP,
+                "grace_until": grace_until}
+    daohang_rate = rates[tier]
+    ascension_rule = (
+        f"每{ASC_CFG.OVERFLOW_CULTIVATION_PER_POINT // 10_000}万溢出修为凝1飞升点，"
+        f"每周最多{ASC_CFG.OVERFLOW_WEEKLY_CAP}点"
+    )
     if tier == "full":
-        label = f"顶点档（道行 {_pct(daohang_rate)} / 飞升点 {_pct(ascension_rate)}）"
+        label = f"顶点档（道行 {_pct(daohang_rate)} / {ascension_rule}）"
     elif tier == "grace_full":
         label = (
-            f"宽限顶点档（道行 {_pct(daohang_rate)} / 飞升点 {_pct(ascension_rate)}，"
+            f"宽限顶点档（道行 {_pct(daohang_rate)} / {ascension_rule}，"
             f"至 {_time_text(grace_until)}）"
         )
     else:
         label = f"次顶点档（道行 {_pct(daohang_rate)} / 飞升点 0）"
     return {"status": tier, "active": True, "label": label,
-            "daohang_rate": daohang_rate, "ascension_rate": ascension_rate,
+            "daohang_rate": daohang_rate, "ascension_rate": 0.0,
+            "ascension_cultivation_per_point": ASC_CFG.OVERFLOW_CULTIVATION_PER_POINT,
+            "ascension_weekly_cap": ASC_CFG.OVERFLOW_WEEKLY_CAP,
             "grace_until": grace_until}
 
 
@@ -1188,7 +1203,7 @@ async def _grant_reward_conn(conn, user_id: int, stone: int = 0,
         if row:
             now = int(time.time())
             grace_until = await _overflow_grace_until_conn(conn)
-            new_cult, daohang, asc_pts = settle.overflow_split(
+            new_cult, daohang, asc_overflow = settle.overflow_split(
                 row["realm"], row["stage"], int(row["cultivation"] or 0), cultivation,
                 now=now, grace_until=grace_until)
             daohang = await _cap_overflow_daohang(conn, user_id, daohang, now)
@@ -1196,8 +1211,9 @@ async def _grant_reward_conn(conn, user_id: int, stone: int = 0,
                 "UPDATE characters SET cultivation=?, daohang=daohang+? WHERE user_id=?",
                 (new_cult, daohang, user_id))
             await _add_daohang_event(conn, user_id, daohang, "reward", now)
-            if asc_pts:
-                await ascension.add_points_conn(conn, user_id, asc_pts, now)
+            if asc_overflow:
+                await ascension.add_overflow_points_conn(
+                    conn, user_id, asc_overflow, now)
         else:
             await conn.execute(
                 "UPDATE characters SET cultivation = MAX(0, cultivation + ?) WHERE user_id=?",
