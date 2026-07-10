@@ -19,7 +19,8 @@ from config import buffs as BUFFS
 from config import daohang as DAOHANG_CFG
 from config import dao_paths as DAO
 from config import natal as NATAL
-from config.ascension import PASSIVE_CAP, PASSIVES
+from config.ascension import (OVERFLOW_CULTIVATION_PER_POINT, OVERFLOW_WEEKLY_CAP,
+                              PASSIVE_CAP, PASSIVES)
 from config.bosses import WORLD_BOSSES
 from config.dungeons import DUNGEONS
 from config.items import ITEMS
@@ -617,10 +618,12 @@ _ASCENSION_TRADEABLE_KEYS = ("飞升点",)
 
 
 def ascension_arbitrage_guard() -> dict:
-    """飞升点(M3)反套利：被动增益受 PASSIVE_CAP 硬上限 + §6.3 clamp 双约束。"""
+    """飞升点反套利：凝点周限、被动硬上限与 §6.3 clamp 共同约束。"""
     max_single_pct = PASSIVE_CAP * 0.01
     return {
         "passive_cap": PASSIVE_CAP,
+        "overflow_cultivation_per_point": OVERFLOW_CULTIVATION_PER_POINT,
+        "overflow_weekly_cap": OVERFLOW_WEEKLY_CAP,
         "max_single_pct": max_single_pct,
         "within_clamp": max_single_pct <= min(BUFFS.ATTACK_PCT_CAP, BUFFS.SURVIVAL_PCT_CAP),
         "tradeable_violations": [k for k in _ASCENSION_TRADEABLE_KEYS
@@ -852,7 +855,9 @@ def report() -> None:
           f"历练单次≤{reg['max_explore']} 秘境单次≤{reg['max_dungeon']} "
           f"{'✅低于活动上限' if reg['under_activity_cap'] else '⚠️高于活动上限'}")
     asc = ascension_arbitrage_guard()
-    print(f"  飞升点护栏: 被动上限{asc['passive_cap']}级(+{asc['max_single_pct']*100:.0f}%) "
+    print(f"  飞升点护栏: 每{asc['overflow_cultivation_per_point']}溢出修为凝1点 "
+          f"周上限{asc['overflow_weekly_cap']} "
+          f"被动上限{asc['passive_cap']}级(+{asc['max_single_pct']*100:.0f}%) "
           f"{'✅受clamp' if asc['within_clamp'] else '⚠️破clamp'} "
           f"可交易违规{asc['tradeable_violations'] or '无'}")
     print(f"  坊市护栏: 关键材料直售违规 {market_arbitrage_violations() or '无'}")

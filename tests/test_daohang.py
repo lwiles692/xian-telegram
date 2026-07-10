@@ -43,31 +43,33 @@ def test_overflow_to_daohang_full_lianxu():
     assert daohang == int(1000 * settle.DAOHANG_FULL_REALM_RATE)  # 80 @ 0.08
 
 
-def test_overflow_split_full_lianxu_gives_daohang_and_ascension_points():
+def test_overflow_split_full_lianxu_returns_condensable_overflow():
     cost = R.advance_cost(5, 3)
-    kept, daohang, asc_pts = settle.overflow_split(5, 3, cost, 1000)
+    kept, daohang, asc_overflow = settle.overflow_split(5, 3, cost, 1000)
 
     assert kept == cost
     assert daohang == int(1000 * settle.DAOHANG_FULL_REALM_RATE)  # 80 @ 0.08
-    assert asc_pts == 200  # 飞升点转化率不变（下游有硬上限）
+    assert asc_overflow == 1000
 
 
 def test_overflow_split_huashen_cap_transition_gives_daohang_only():
     cost = R.advance_cost(4, 3)
-    kept, daohang, asc_pts = settle.overflow_split(4, 3, cost, 1000, now=200, grace_until=100)
+    kept, daohang, asc_overflow = settle.overflow_split(
+        4, 3, cost, 1000, now=200, grace_until=100)
 
     assert kept == cost
     assert daohang == int(1000 * settle.DAOHANG_PRE_CAP_RATE)  # 30 @ 0.03
-    assert asc_pts == 0
+    assert asc_overflow == 0
 
 
 def test_overflow_split_huashen_grace_uses_full_split():
     cost = R.advance_cost(4, 3)
-    kept, daohang, asc_pts = settle.overflow_split(4, 3, cost, 1000, now=100, grace_until=200)
+    kept, daohang, asc_overflow = settle.overflow_split(
+        4, 3, cost, 1000, now=100, grace_until=200)
 
     assert kept == cost
     assert daohang == int(1000 * settle.DAOHANG_FULL_REALM_RATE)
-    assert asc_pts == int(1000 * settle.ASCENSION_FULL_REALM_RATE)
+    assert asc_overflow == 1000
 
 
 def test_overflow_to_daohang_other_progress_is_unchanged():
@@ -86,7 +88,7 @@ async def test_collect_seclusion_converts_lianxu_cap_overflow(temp_db):
     await db.execute("UPDATE characters SET root_bone=0 WHERE user_id=?", (uid,))
 
     await character.start_seclusion(uid, now=1000)
-    res = await character.collect_seclusion(uid, now=1000 + 3600)
+    res = await character.collect_seclusion(uid, now=1000 + 12 * 3600)
     row = await db.fetchone("SELECT cultivation, daohang FROM characters WHERE user_id=?", (uid,))
     asc = await ascension.get(uid)
     event = await db.fetchone(
@@ -99,7 +101,8 @@ async def test_collect_seclusion_converts_lianxu_cap_overflow(temp_db):
     assert row["cultivation"] == cost
     assert row["daohang"] == res["daohang"]
     assert asc["points"] == res["ascension"]
-    assert asc["points"] > 0
+    assert asc["points"] == 1
+    assert asc["overflow_remainder"] > 0
     assert event["amount"] == res["daohang"]
 
 
@@ -129,7 +132,7 @@ async def test_collect_seclusion_converts_huashen_transition_without_ascension(t
 
 
 @pytest.mark.asyncio
-async def test_collect_seclusion_converts_huashen_grace_as_full_split(temp_db):
+async def test_collect_seclusion_huashen_grace_accumulates_condensation_progress(temp_db):
     uid = 9406
     cost = R.advance_cost(4, 3)
     grace_until = int(time.time()) + 3600
@@ -147,10 +150,11 @@ async def test_collect_seclusion_converts_huashen_grace_as_full_split(temp_db):
     assert res["status"] == "collected"
     assert res["cultivation"] == cost
     assert res["daohang"] == int(gained * settle.DAOHANG_FULL_REALM_RATE)
-    assert res["ascension"] == int(gained * settle.ASCENSION_FULL_REALM_RATE)
+    assert res["ascension"] == 0
     assert res["overflow"]["status"] == "grace_full"
     assert row["daohang"] == res["daohang"]
-    assert asc["points"] == res["ascension"]
+    assert asc["points"] == 0
+    assert asc["overflow_remainder"] == gained
 
     from handlers import me as me_handler
     text, _ = await me_handler.render_me(uid)
@@ -174,7 +178,8 @@ async def test_touch_activity_auto_collect_converts_overflow(temp_db):
     assert res["auto_cultivation"] > 0
     assert row["cultivation"] == cost
     assert row["daohang"] > 0
-    assert asc["points"] > 0
+    assert asc["points"] == 0
+    assert asc["overflow_remainder"] > 0
 
 
 @pytest.mark.asyncio
@@ -205,13 +210,13 @@ async def test_overflow_daohang_weekly_cap_shared_across_grace_and_lianxu(temp_d
     lianxu_cost = R.advance_cost(5, 3)
     await character.create(uid, "shared")
     await character.set_progress(uid, 4, 3, huashen_cost)
-    await db.execute("UPDATE characters SET root_bone=0 WHERE user_id=?", (uid,))
+    await db.execute("UPDATE characters SET root_bone=100 WHERE user_id=?", (uid,))
     await _set_overflow_grace_until(int(time.time()) + 3600)
 
     await character.start_seclusion(uid, now=1000)
     first = await character.collect_seclusion(uid, now=1000 + 12 * 3600)
     assert first["daohang"] == settle.OVERFLOW_DAOHANG_WEEKLY_CAP
-    assert first["ascension"] > 0
+    assert first["ascension"] == 1
 
     await character.set_progress(uid, 5, 3, lianxu_cost)
     await character.start_seclusion(uid, now=1000 + 12 * 3600 + 1)
@@ -220,7 +225,7 @@ async def test_overflow_daohang_weekly_cap_shared_across_grace_and_lianxu(temp_d
         "SELECT daohang FROM characters WHERE user_id=?", (uid,))
 
     assert second["daohang"] == 0
-    assert second["ascension"] > 0
+    assert second["ascension"] >= 1
     assert row["daohang"] == settle.OVERFLOW_DAOHANG_WEEKLY_CAP
 
 

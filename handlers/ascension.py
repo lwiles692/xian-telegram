@@ -27,6 +27,8 @@ async def render_ascension(user_id: int):
         "🌌 飞升",
         f"飞升点：{state['points']}　总阶：{state['level']}{title_line}　道行：{char.daohang}",
         f"飞升试炼：化神圆满可挑战，消耗道行 {CFG.TRIAL_DAOHANG_COST}，得飞升点 {CFG.TRIAL_POINT_REWARD}。",
+        (f"溢出凝点：本周 {state['overflow_week_points']}/{CFG.OVERFLOW_WEEKLY_CAP}　"
+         f"道痕 {state['overflow_remainder']}/{CFG.OVERFLOW_CULTIVATION_PER_POINT}"),
         "—— 被动 ——",
     ]
     buttons = [InlineKeyboardButton(
@@ -39,6 +41,23 @@ async def render_ascension(user_id: int):
             buttons.append(InlineKeyboardButton(
                 text=f"升级 {name}",
                 callback_data=await action_callback_data(user_id, f"asc:up:{key}")))
+    if state["tianmen_unlocked"]:
+        tianmen_title = f"　称谓：「{state['tianmen_title']}」" if state["tianmen_title"] else ""
+        lines.extend([
+            "—— 叩问天门 ——",
+            f"天门：第 {state['tianmen_level']} 重{tianmen_title}",
+            f"下一重：{state['tianmen_progress']}/{state['tianmen_next_cost']}",
+        ])
+        if state["points"] > 0:
+            for amount in CFG.TIANMEN_CONTRIBUTIONS:
+                buttons.append(InlineKeyboardButton(
+                    text=f"投入 {amount} 点",
+                    callback_data=await action_callback_data(user_id, f"asc:tm:{amount}")))
+            buttons.append(InlineKeyboardButton(
+                text="全部投入天门",
+                callback_data=await action_callback_data(user_id, "asc:tm:all")))
+    else:
+        lines.append("叩问天门：四项飞升被动圆满后开放。")
     rows = button_grid(buttons)
     append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
@@ -52,6 +71,19 @@ def _result_text(res: dict) -> str:
         title = res.get("title") or ""
         unlock = f"　尊号「{title}」解锁！" if title else ""
         return f"{res['name']} 被动升至 {res['level']} 级。{unlock}"
+    if s == "tianmen_ok":
+        lines = [
+            f"已向天门投入飞升点 {res['spent']}，余 {res['points']} 点。",
+            f"天门第 {res['level']} 重，下一重进度 {res['progress']}/{res['next_cost']}。",
+        ]
+        if res.get("crossed"):
+            lines.append(f"本次叩开至第 {res['level']} 重。")
+        if res.get("title"):
+            lines.append(f"当前称谓：「{res['title']}」。")
+        if res.get("rewards"):
+            rewards = "、".join(f"{row['name']}×{row['qty']}" for row in res["rewards"])
+            lines.append(f"天门赐下绑定奖励：{rewards}。")
+        return "\n".join(lines)
     if s == "locked":
         return "化神圆满后方可挑战飞升试炼。"
     if s == "weekly_done":
@@ -60,6 +92,10 @@ def _result_text(res: dict) -> str:
         return f"道行不足（需 {res['need']}，现有 {res['have']}）。"
     if s == "no_points":
         return f"飞升点不足（需 {res['need']}，现有 {res['have']}）。"
+    if s == "passives_not_max":
+        return "四项飞升被动均臻圆满后，方可叩问天门。"
+    if s == "bad_amount":
+        return "投入数目有误，天门未受此礼。"
     if s == "max":
         return f"此被动已达上限 {res['cap']} 级。"
     if s == "bad_passive":
@@ -95,6 +131,10 @@ async def cb_ascension_action(callback: CallbackQuery):
         return
     if action == "asc:trial":
         res = await ascension.trial(callback.from_user.id)
+    elif action.startswith("asc:tm:"):
+        raw_amount = action.rsplit(":", 1)[1]
+        amount = None if raw_amount == "all" else int(raw_amount)
+        res = await ascension.contribute_tianmen(callback.from_user.id, amount)
     else:
         res = await ascension.upgrade_passive(callback.from_user.id, action.rsplit(":", 1)[1])
     await show(callback, _result_text(res), section_back_markup("↩️ 返回飞升", "nav:ascension"))

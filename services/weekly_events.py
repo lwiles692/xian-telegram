@@ -47,7 +47,9 @@ async def exchange(user_id: int, offer_key: str, now: int = None) -> dict:
             return {"status": "no_material", "need": cost, "have": have}
         await _consume_activity_materials(conn, user_id, cost)
         if offer["reward_kind"] == "ascension":
-            await ascension.add_points_conn(conn, user_id, int(offer["reward_qty"]), now)
+            await ascension.add_points_conn(
+                conn, user_id, int(offer["reward_qty"]), now,
+                source="weekly_exchange", meta={"offer": offer_key})
             return {"status": "ok", "kind": "ascension", "name": offer["name"],
                     "qty": int(offer["reward_qty"]), "cost": cost}
         # 绑定道具入包（bound=1），与坊市隔离一致。

@@ -107,8 +107,9 @@ balance_sim 首破路径校验见 T0.11。
 
 ### T0.8 溢出分流上移 + 降档宽限期(`models/db.py` + `services/settle.py` + `services/character.py`)
 
-- `overflow_split` 判据 len-based,追加 realm 5 后炼虚圆满自动走顶点档(8%/20%)、
-  化神圆满自动落次顶点档(3%/0)——**比率与周上限 600 一律不动**(spec §3.8)。
+- `overflow_split` 判据 len-based,追加 realm 5 后炼虚圆满自动走顶点档(8% 道行 +
+  每十万溢出修为凝 1 飞升点)、化神圆满自动落次顶点档(3%/0)。道行周上限 600，
+  飞升点溢出来源周上限 14(spec §3.8)。
 - 新增 `game_flags(key TEXT PRIMARY KEY, value TEXT NOT NULL)` 表(SCHEMA + `init_db`)。
 - **宽限期**:`init_db` 内可重入迁移——`game_flags` 无 `overflow_demote_grace_until` 时写入
   `部署时刻 + 28 天`(已存在则不覆盖,幂等)。
@@ -116,8 +117,9 @@ balance_sim 首破路径校验见 T0.11。
   `services/character.py` 从 `game_flags` 读取并缓存):宽限期内化神圆满按顶点档分流。
 - 面板/收功界面展示玩家当前分流档位(顶点档 / 次顶点档 / 宽限中)。
 
-**验收**(spec §9):炼虚圆满 8%/20% 完整分流;化神圆满宽限内顶点档、期满次顶点档
-(单测卡宽限截止两侧时间点);周上限 600 跨档生效;`game_flags` 迁移重复执行不覆盖已有值。
+**验收**(spec §9):炼虚圆满按十万修为凝点;化神圆满宽限内顶点档、期满次顶点档
+(单测卡宽限截止两侧时间点);道行周上限 600、凝点周上限 14 跨档生效;
+`game_flags` 迁移重复执行不覆盖已有值。
 
 ### T0.9 公告三处文案(M0 上线**前置验收**,spec §3.8)
 

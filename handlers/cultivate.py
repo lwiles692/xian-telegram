@@ -6,6 +6,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from config import ascension as ASC_CFG
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
                              action_callback_data, append_main_menu_return,
                              consume_action_callback, menu_with_breakthrough,
@@ -20,6 +21,11 @@ def _collect_text(res: dict) -> str:
              f"修为 {res['cultivation']}/{res['cost']}"]
     if res.get("daohang") or res.get("ascension"):
         lines.append(f"溢出所得：道行+{res.get('daohang', 0)}，飞升点+{res.get('ascension', 0)}")
+    ascension_state = res.get("ascension_state") or {}
+    if ascension_state:
+        lines.append(
+            f"凝点进度：{ascension_state['remainder']}/{ASC_CFG.OVERFLOW_CULTIVATION_PER_POINT}，"
+            f"本周 {ascension_state['week_points']}/{ascension_state['week_cap']}。")
     overflow = res.get("overflow") or {}
     if overflow.get("active"):
         lines.append(f"溢出分流：{overflow['label']}")
