@@ -109,10 +109,15 @@ async def test_huashen_pill_recipe_converts_scraps(temp_db):
 def test_need_pill_huashen_hints_source():
     from handlers import cultivate
     huashen = cultivate._bt_text({"status": "need_pill", "pill": "化神丹"})
+    lianxu = cultivate._bt_text({"status": "need_pill", "pill": "炼虚丹"})
     yuanjing = cultivate._bt_text({"status": "need_pill", "pill": "元婴丹"})
 
     assert "天外古墟" in huashen                       # 给出化神丹出处
     assert "化神丹残方" in huashen or "太虚天门" in huashen   # 或炼丹链路
+    assert "太虚天门" in lianxu
+    assert "炼虚丹方" in lianxu or "炼虚丹残方" in lianxu
+    assert "天外古墟或可直接寻得炼虚丹" in lianxu
+    assert "收集残方，获得炼虚丹方后炼制" in lianxu
     assert "天外古墟" not in yuanjing                 # 非化神丹不给误导指引
 
 

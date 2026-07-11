@@ -7,9 +7,10 @@ import time
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from config import daohang as DAOHANG
 from config.bosses import (DEFAULT_BOSS, WORLD_BOSSES, WORLD_BOSS_FULL_HP_CULTIVATORS,
                            boss_key_for_realm, canonical_boss_key)
-from config import ascension as ASC_CFG
+from config import ascension as ASC_CFG, bonds as BONDS
 from config.items import item_name
 from handlers.common import action_callback_data
 from services import ascension, character, game_events
@@ -170,7 +171,7 @@ async def _active_row(conn, chat_id: int, now: int):
     await cur.close()
     if row and row["expire_at"] <= now:
         await conn.execute("UPDATE world_boss SET status='expired' WHERE id=?", (row["id"],))
-        await _distribute(conn, row["id"], _boss_cfg(row["boss_key"]))
+        await _distribute(conn, row["id"], _boss_cfg(row["boss_key"]), now)
         return None
     return row
 
@@ -306,6 +307,7 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
 
     rewards = []
     defeated = False
+    challenge_daohang = 0
     async with db.transaction() as conn:
         current = await _active_row(conn, chat_id, now)
         if not current:
@@ -323,10 +325,14 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
             "INSERT INTO world_boss_damage(boss_id, user_id, damage) VALUES(?,?,?) "
             "ON CONFLICT(boss_id, user_id) DO UPDATE SET damage = damage + ?",
             (current["id"], user_id, damage, damage))
+        challenge_daohang = await character.grant_regular_daohang_conn(
+            conn, user_id, DAOHANG.WORLD_BOSS_CHALLENGE_DAOHANG,
+            "world_boss_challenge", now, realm=char.realm)
         leaderboard = await _leaderboard(conn, current["id"])
         if remaining <= 0:
             defeated = True
-            rewards = await _distribute(conn, current["id"], cfg)
+            rewards = await _distribute(conn, current["id"], cfg, now)
+        partner_combo = await _partner_combo_flavor_conn(conn, current["id"], user_id)
         await game_events.emit_conn(
             conn, user_id, "world_boss.challenge",
             {"boss_key": current["boss_key"], "boss_name": cfg["name"],
@@ -336,11 +342,34 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
     return {"status": "ok", "damage": damage, "remaining_hp": remaining,
             "total_hp": boss["total_hp"], "boss_name": cfg["name"], "defeated": defeated,
             "leaderboard": leaderboard, "rewards": rewards, "boss_id": boss["id"],
-            "stamina_left": reserve["stamina_left"]}
+            "stamina_left": reserve["stamina_left"], "daohang": challenge_daohang,
+            "partner_combo": partner_combo}
 
 
-async def _distribute(conn, boss_id: int, cfg: dict):
+async def _partner_combo_flavor_conn(conn, boss_id: int, user_id: int) -> str | None:
+    cur = await conn.execute(
+        "SELECT b.b_id, u.username FROM social_bonds b "
+        "LEFT JOIN users u ON u.tg_user_id=b.b_id "
+        "WHERE b.kind=? AND b.status=? AND b.a_id=? LIMIT 1",
+        (BONDS.KIND_PARTNER, BONDS.STATUS_ACTIVE, user_id))
+    bond = await cur.fetchone()
+    await cur.close()
+    if not bond:
+        return None
+    cur = await conn.execute(
+        "SELECT damage FROM world_boss_damage WHERE boss_id=? AND user_id=?",
+        (boss_id, bond["b_id"]))
+    damage = await cur.fetchone()
+    await cur.close()
+    if not damage or int(damage["damage"] or 0) <= 0:
+        return None
+    partner_name = bond["username"] or str(bond["b_id"])
+    return f"💞 与道侣{partner_name}并肩合击，灵犀相照。"
+
+
+async def _distribute(conn, boss_id: int, cfg: dict, now: int = None):
     """参与奖 + 软化分层贡献奖；小群特殊掉落至少覆盖前 2 名。"""
+    now = int(time.time()) if now is None else now
     cur = await conn.execute(
         "SELECT user_id, damage FROM world_boss_damage WHERE boss_id=? ORDER BY damage DESC",
         (boss_id,))
@@ -377,9 +406,17 @@ async def _distribute(conn, boss_id: int, cfg: dict):
         asc_points = 0
         if cfg.get("realm") == ASC_CFG.BOSS_ASCENSION_REALM and idx < len(ASC_CFG.BOSS_RANK_POINTS):
             asc_points = ASC_CFG.BOSS_RANK_POINTS[idx]
-            await ascension.add_points_conn(conn, row["user_id"], asc_points)
+            await ascension.add_points_conn(
+                conn, row["user_id"], asc_points, now,
+                source="world_boss", meta={"rank": idx + 1, "boss_id": boss_id})
+        daohang = 0
+        if idx < len(DAOHANG.WORLD_BOSS_RANK_DAOHANG):
+            daohang = await character.grant_regular_daohang_conn(
+                conn, row["user_id"], DAOHANG.WORLD_BOSS_RANK_DAOHANG[idx],
+                "world_boss_rank", now)
         rewards.append({"user_id": row["user_id"], "stone": stone, "drops": drops,
-                        "rank": idx + 1, "ascension_points": asc_points})
+                        "rank": idx + 1, "ascension_points": asc_points,
+                        "daohang": daohang})
     return rewards
 
 
@@ -387,13 +424,15 @@ def reward_text(rewards: list) -> str:
     if not rewards:
         return ""
     base = f"击杀奖励已结算，{len(rewards)} 位道友按贡献分润灵石"
+    daohang_total = sum(row.get("daohang", 0) for row in rewards)
+    daohang_text = f"，道行共+{daohang_total}" if daohang_total else ""
     drop_rows = [row for row in rewards if row["drops"]]
     if not drop_rows:
-        return base + "。"
+        return base + daohang_text + "。"
     totals = {}
     for row in drop_rows:
         for key, qty in row["drops"].items():
             totals[key] = totals.get(key, 0) + qty
     drops = "、".join(f"{item_name(key)}×{qty}" for key, qty in totals.items())
     prefix = "前列" if len(drop_rows) > 1 else "榜首"
-    return f"{base}，{prefix}另分 {drops}。"
+    return f"{base}，{prefix}另分 {drops}{daohang_text}。"

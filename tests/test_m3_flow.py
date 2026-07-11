@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 import copy
 
 import pytest
 import pytest_asyncio
 
+from config import bonds as BONDS
 from config import bosses
 from config import realms as R
+from handlers import boss as boss_handler
 from models import db
 from services import character, daily, pvp, sect, world_boss
 
@@ -211,6 +215,43 @@ async def test_world_boss_challenge_defeats_and_rewards(temp_db):
         assert (await character.get(uid)).spirit_stone >= 200
     finally:
         bosses.WORLD_BOSSES["zhuji"] = original
+
+
+@pytest.mark.asyncio
+async def test_world_boss_道侣双方留伤后展示合击文案不改数值(temp_db):
+    chat_id = -3320
+    a_id, b_id = 332001, 332002
+    now = 1_000
+    for user_id, name in ((a_id, "道友甲"), (b_id, "道友乙")):
+        await character.create(user_id, name)
+        await character.set_progress(user_id, 2, 0, 0)
+        await db.execute(
+            "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+            (300, now, user_id))
+    for left, right in ((a_id, b_id), (b_id, a_id)):
+        await db.execute(
+            "INSERT INTO social_bonds(kind, a_id, b_id, initiator_id, status, "
+            "created_at, activated_at, confirmed_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (BONDS.KIND_PARTNER, left, right, a_id, BONDS.STATUS_ACTIVE,
+             now, now, now, now))
+    await db.execute(
+        "INSERT INTO world_boss(chat_id, boss_key, total_hp, remaining_hp, "
+        "spawn_at, expire_at, status, cultivator_count) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (chat_id, "zhuji", 999_999, 999_999, now, now + 7200, "alive", 2))
+
+    first = await world_boss.challenge(chat_id, a_id, now=now + 10)
+    second = await world_boss.challenge(chat_id, b_id, now=now + 20)
+    text = boss_handler._challenge_text(second)
+
+    assert first["status"] == "ok"
+    assert not first["partner_combo"]
+    assert second["status"] == "ok"
+    assert second["damage"] > 0
+    assert second["partner_combo"] == "💞 与道侣道友甲并肩合击，灵犀相照。"
+    assert second["damage"] <= second["total_hp"]
+    assert second["partner_combo"] in text
 
 
 @pytest.mark.asyncio

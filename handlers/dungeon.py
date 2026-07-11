@@ -94,6 +94,8 @@ def _result_text(res: dict) -> str:
         return "查无此秘境。"
     rw = res["reward"]
     parts = [f"🪙{rw['stone']}", f"修为+{rw['cult']}"]
+    if rw.get("daohang"):
+        parts.append(f"道行+{rw['daohang']}")
     if rw["drops"]:
         parts.append("、".join(f"{item_name(k)}×{v}" for k, v in rw["drops"].items()))
     if rw["equipment"]:

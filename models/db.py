@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """SQLite 访问层：单连接 + WAL + 写串行化（spec §13/§14）。
 
 约定（供后续模块复用）：
@@ -5,10 +7,10 @@
 - 写用 ``execute`` / ``executemany``（经 ``_write_lock`` 串行化，护灵石/库存等）。
 - schema 启动时幂等建表。
 """
-from __future__ import annotations
 
 import asyncio
 import os
+import time
 from contextlib import asynccontextmanager
 
 import aiosqlite
@@ -17,6 +19,10 @@ _DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "xia
 _conn = None          # 写连接：事务 / 写入，经 _write_lock 串行化
 _read_conn = None     # 只读连接：WAL 快照读，永不取写锁，杜绝脏读与读-写死锁
 _write_lock = None
+_generation = 0
+
+GAME_FLAG_OVERFLOW_DEMOTE_GRACE_UNTIL = "overflow_demote_grace_until"
+OVERFLOW_DEMOTE_GRACE_SECONDS = 28 * 24 * 3600
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -24,6 +30,10 @@ CREATE TABLE IF NOT EXISTS users (
     username    TEXT,
     created_at  INTEGER NOT NULL,
     last_seen_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS game_flags (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS characters (
     user_id       INTEGER PRIMARY KEY,
@@ -35,6 +45,8 @@ CREATE TABLE IF NOT EXISTS characters (
     stamina       INTEGER NOT NULL,
     stamina_at    INTEGER NOT NULL,
     seclusion_at  INTEGER,
+    last_seclusion_start INTEGER,
+    last_seclusion_end   INTEGER,
     spirit_stone  INTEGER NOT NULL DEFAULT 0,
     weapon_key    TEXT NOT NULL DEFAULT '新手剑',
     alchemy_prof  INTEGER NOT NULL DEFAULT 0,
@@ -44,6 +56,8 @@ CREATE TABLE IF NOT EXISTS characters (
     stamina_buy_day     TEXT,
     pill_stamina_count  INTEGER NOT NULL DEFAULT 0,
     pill_stamina_day    TEXT,
+    big_fail_streak     INTEGER NOT NULL DEFAULT 0,
+    natal_instance_id   INTEGER,
     created_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventory (
@@ -66,7 +80,18 @@ CREATE TABLE IF NOT EXISTS item_instances (
     tier           TEXT NOT NULL,
     affixes_json   TEXT NOT NULL DEFAULT '{}',
     enhance_level  INTEGER NOT NULL DEFAULT 0,
-    equipped_slot  TEXT
+    natal_level    INTEGER NOT NULL DEFAULT 0,
+    bound          INTEGER NOT NULL DEFAULT 0,
+    equipped_slot  TEXT,
+    status         TEXT NOT NULL DEFAULT 'normal'
+);
+CREATE TABLE IF NOT EXISTS natal_feed_logs (
+    user_id     INTEGER NOT NULL,
+    instance_id INTEGER NOT NULL,
+    level       INTEGER NOT NULL,
+    cost_json   TEXT NOT NULL DEFAULT '{}',
+    fed_at      INTEGER NOT NULL,
+    PRIMARY KEY (user_id, instance_id, level)
 );
 CREATE TABLE IF NOT EXISTS recipes_known (
     user_id     INTEGER NOT NULL,
@@ -218,11 +243,13 @@ CREATE TABLE IF NOT EXISTS tribulation_sessions (
     cultivation   INTEGER NOT NULL,
     cost          INTEGER NOT NULL,
     rate          REAL NOT NULL,
+    guarantee_bonus REAL NOT NULL DEFAULT 0,
     guard_bonus   INTEGER NOT NULL DEFAULT 0,
     hp            INTEGER NOT NULL,
     thunder_index INTEGER NOT NULL DEFAULT 1,
     seed          INTEGER NOT NULL,
     log_json      TEXT NOT NULL DEFAULT '[]',
+    reward_flag   TEXT,
     created_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS social_broadcasts (
@@ -288,18 +315,164 @@ CREATE TABLE IF NOT EXISTS path_events (
     amount      INTEGER NOT NULL DEFAULT 0,
     created_at  INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS ascension (
-    user_id     INTEGER PRIMARY KEY,
-    level       INTEGER NOT NULL DEFAULT 0,
-    points      INTEGER NOT NULL DEFAULT 0,
-    spent_json  TEXT NOT NULL DEFAULT '{}',
-    updated_at  INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS social_bonds (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL,
+    a_id            INTEGER NOT NULL,
+    b_id            INTEGER NOT NULL,
+    initiator_id    INTEGER,
+    status          TEXT NOT NULL,
+    active_days     INTEGER NOT NULL DEFAULT 0,
+    last_active_day TEXT,
+    created_at      INTEGER NOT NULL,
+    expires_at      INTEGER,
+    activated_at    INTEGER,
+    confirmed_at    INTEGER,
+    dissolved_at    INTEGER,
+    updated_at      INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS bond_milestones (
+    bond_kind  TEXT NOT NULL,
+    a_id       INTEGER NOT NULL,
+    b_id       INTEGER NOT NULL,
+    milestone  TEXT NOT NULL,
+    claimed_at INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, a_id, b_id, milestone)
+);
+CREATE TABLE IF NOT EXISTS bond_daily_transfers (
+    bond_kind   TEXT NOT NULL,
+    a_id        INTEGER NOT NULL,
+    b_id        INTEGER NOT NULL,
+    active_day  TEXT NOT NULL,
+    cultivation INTEGER NOT NULL DEFAULT 0,
+    granted_at  INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, a_id, b_id, active_day)
+);
+CREATE TABLE IF NOT EXISTS bond_daily_gifts (
+    bond_kind   TEXT NOT NULL,
+    a_id        INTEGER NOT NULL,
+    b_id        INTEGER NOT NULL,
+    giver_id    INTEGER NOT NULL,
+    receiver_id INTEGER NOT NULL,
+    active_day  TEXT NOT NULL,
+    item_key    TEXT NOT NULL,
+    qty         INTEGER NOT NULL DEFAULT 1,
+    granted_at  INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, giver_id, active_day)
+);
+CREATE TABLE IF NOT EXISTS bond_activity_days (
+    bond_kind   TEXT NOT NULL,
+    a_id        INTEGER NOT NULL,
+    b_id        INTEGER NOT NULL,
+    active_day  TEXT NOT NULL,
+    week        TEXT NOT NULL,
+    recorded_at INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, a_id, b_id, active_day)
+);
+CREATE INDEX IF NOT EXISTS idx_bond_activity_week
+ON bond_activity_days(bond_kind, week, a_id);
+CREATE TABLE IF NOT EXISTS bond_weekly_rewards (
+    bond_kind   TEXT NOT NULL,
+    a_id        INTEGER NOT NULL,
+    b_id        INTEGER NOT NULL,
+    week        TEXT NOT NULL,
+    active_days INTEGER NOT NULL DEFAULT 0,
+    raw_daohang INTEGER NOT NULL DEFAULT 0,
+    daohang     INTEGER NOT NULL DEFAULT 0,
+    settled_at  INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, a_id, b_id, week)
+);
+CREATE TABLE IF NOT EXISTS partner_weekly_tasks (
+    bond_kind  TEXT NOT NULL,
+    a_id       INTEGER NOT NULL,
+    b_id       INTEGER NOT NULL,
+    week       TEXT NOT NULL,
+    a_done     INTEGER NOT NULL DEFAULT 0,
+    b_done     INTEGER NOT NULL DEFAULT 0,
+    reward_a   INTEGER NOT NULL DEFAULT 0,
+    reward_b   INTEGER NOT NULL DEFAULT 0,
+    settled_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (bond_kind, a_id, b_id, week)
+);
+CREATE TABLE IF NOT EXISTS bond_titles (
+    user_id     INTEGER NOT NULL,
+    title_key   TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    threshold   INTEGER NOT NULL,
+    unlocked_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, title_key)
+);
+CREATE TABLE IF NOT EXISTS communion_sessions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind         TEXT NOT NULL,
+    bond_id      INTEGER,
+    a_id         INTEGER NOT NULL,
+    b_id         INTEGER NOT NULL,
+    initiator_id INTEGER NOT NULL,
+    confirmer_id INTEGER,
+    status       TEXT NOT NULL,
+    invited_at   INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL,
+    start_at     INTEGER,
+    end_at       INTEGER,
+    completed_at INTEGER,
+    updated_at   INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS communion_weekly_usage (
+    user_id    INTEGER NOT NULL,
+    week       TEXT NOT NULL,
+    session_id INTEGER NOT NULL,
+    kind       TEXT NOT NULL,
+    used_at    INTEGER NOT NULL,
+    PRIMARY KEY (user_id, week)
+);
+CREATE INDEX IF NOT EXISTS idx_bonds_a
+ON social_bonds(a_id, kind, status);
+CREATE INDEX IF NOT EXISTS idx_bonds_b
+ON social_bonds(b_id, kind, status);
+CREATE INDEX IF NOT EXISTS idx_bonds_mentor_a
+ON social_bonds(kind, a_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bonds_mentor_b
+ON social_bonds(b_id)
+WHERE kind='mentor' AND status IN ('pending', 'active');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bonds_partner_a
+ON social_bonds(a_id)
+WHERE kind='partner' AND status IN ('pending', 'active');
+CREATE INDEX IF NOT EXISTS idx_communion_sessions_open
+ON communion_sessions(status, a_id, b_id);
+CREATE INDEX IF NOT EXISTS idx_communion_sessions_expire
+ON communion_sessions(status, expires_at);
+CREATE TABLE IF NOT EXISTS ascension (
+    user_id                INTEGER PRIMARY KEY,
+    level                  INTEGER NOT NULL DEFAULT 0,
+    points                 INTEGER NOT NULL DEFAULT 0,
+    spent_json             TEXT NOT NULL DEFAULT '{}',
+    updated_at             INTEGER NOT NULL,
+    last_trial_week        TEXT,
+    overflow_remainder     INTEGER NOT NULL DEFAULT 0,
+    overflow_week          TEXT,
+    overflow_week_points   INTEGER NOT NULL DEFAULT 0,
+    tianmen_level          INTEGER NOT NULL DEFAULT 0,
+    tianmen_progress       INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS ascension_events (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL,
+    source         TEXT NOT NULL,
+    points_delta   INTEGER NOT NULL,
+    balance_after  INTEGER NOT NULL,
+    meta_json      TEXT NOT NULL DEFAULT '{}',
+    created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ascension_events_user_time
+ON ascension_events(user_id, created_at, id);
 CREATE TABLE IF NOT EXISTS weekly_activity (
     user_id     INTEGER NOT NULL,
     week        TEXT NOT NULL,
     runs        INTEGER NOT NULL DEFAULT 0,
     daohang     INTEGER NOT NULL DEFAULT 0,
+    regular_daohang INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, week)
 );
 CREATE TABLE IF NOT EXISTS sect_outposts (
@@ -353,15 +526,71 @@ CREATE TABLE IF NOT EXISTS market_trades (
     tax         INTEGER NOT NULL,
     created_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS auctions (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_id      INTEGER NOT NULL,
+    kind           TEXT NOT NULL,
+    item_key       TEXT,
+    instance_id    INTEGER,
+    qty            INTEGER,
+    start_price    INTEGER NOT NULL,
+    buyout         INTEGER,
+    current_bid    INTEGER,
+    current_bidder INTEGER,
+    end_at         INTEGER NOT NULL,
+    extend_count   INTEGER NOT NULL DEFAULT 0,
+    created_at     INTEGER NOT NULL DEFAULT 0,
+    settled_at     INTEGER NOT NULL DEFAULT 0,
+    status         TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auction_bids (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    auction_id  INTEGER NOT NULL,
+    bidder_id   INTEGER NOT NULL,
+    amount      INTEGER NOT NULL,
+    bid_at      INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auction_escrow (
+    auction_id  INTEGER NOT NULL,
+    bidder_id   INTEGER NOT NULL,
+    amount      INTEGER NOT NULL,
+    PRIMARY KEY (auction_id, bidder_id)
+);
+CREATE TABLE IF NOT EXISTS auction_broadcast_state (
+    chat_id              INTEGER PRIMARY KEY,
+    last_new_notified_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS auction_closing_broadcasts (
+    chat_id     INTEGER NOT NULL,
+    auction_id  INTEGER NOT NULL,
+    notified_at INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, auction_id)
+);
+CREATE TABLE IF NOT EXISTS auction_watchers (
+    auction_id          INTEGER NOT NULL,
+    user_id             INTEGER NOT NULL,
+    created_at          INTEGER NOT NULL,
+    outbid_notified_at  INTEGER,
+    closing_notified_at INTEGER,
+    PRIMARY KEY (auction_id, user_id)
+);
 CREATE INDEX IF NOT EXISTS idx_market_listings_notify
 ON market_listings(status, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_market_trades_audit
 ON market_trades(created_at, seller_id, buyer_id);
+CREATE INDEX IF NOT EXISTS idx_auctions_status_end
+ON auctions(status, end_at);
+CREATE INDEX IF NOT EXISTS idx_auctions_seller
+ON auctions(seller_id, status);
+CREATE INDEX IF NOT EXISTS idx_auction_bids_auction
+ON auction_bids(auction_id, bid_at);
+CREATE INDEX IF NOT EXISTS idx_auction_watchers_user
+ON auction_watchers(user_id, auction_id);
 """
 
 
 async def init_db(path: str = None):
-    global _conn, _read_conn, _write_lock
+    global _conn, _read_conn, _write_lock, _generation
     db_path = path or _DB_PATH
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     if _conn is not None:
@@ -373,6 +602,11 @@ async def init_db(path: str = None):
     _write_lock = asyncio.Lock()
     await _conn.execute("PRAGMA journal_mode=WAL;")
     await _conn.executescript(SCHEMA)
+    await _ensure_game_flag(
+        _conn,
+        GAME_FLAG_OVERFLOW_DEMOTE_GRACE_UNTIL,
+        str(int(time.time()) + OVERFLOW_DEMOTE_GRACE_SECONDS),
+    )
     await _ensure_column(_conn, "users", "last_seen_at", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "alchemy_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "forge_prof", "INTEGER NOT NULL DEFAULT 0")
@@ -381,6 +615,12 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "stamina_buy_day", "TEXT")
     await _ensure_column(_conn, "characters", "pill_stamina_count", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "pill_stamina_day", "TEXT")
+    # spec-v3 §5.2 / T4.2：只保留最近一段已结算闭关区间，供道侣双修重叠折算。
+    await _ensure_column(_conn, "characters", "last_seclusion_start", "INTEGER")
+    await _ensure_column(_conn, "characters", "last_seclusion_end", "INTEGER")
+    # spec-v3 §8.2：失败保底字段仅供化神→炼虚大突破读取；低境界大突破不读不写。
+    await _ensure_column(_conn, "characters", "big_fail_streak", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "characters", "natal_instance_id", "INTEGER")
     # 当前气血/法力（#24）：可空，NULL ⇒ 视为满（旧存档零回填；首次结算按当前 max 落地）。
     # hp_at/mp_at 为各自回复的惰性结算锚点，NULL ⇒ 视为 now（不补算历史回复）。
     await _ensure_column(_conn, "characters", "current_hp", "INTEGER")
@@ -390,12 +630,36 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "daohang", "INTEGER NOT NULL DEFAULT 0")
     # 溢出转道行的每周入账计量（周上限兜底，防满级挂机无限刷道行）。
     await _ensure_column(_conn, "weekly_activity", "overflow_daohang", "INTEGER NOT NULL DEFAULT 0")
+    # 常规玩法道行的每周入账计量（#45）：历练/秘境/Boss/炼制/宗门/PvP 共用小额上限。
+    await _ensure_column(_conn, "weekly_activity", "regular_daohang", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "world_boss", "message_id", "INTEGER")
     await _ensure_column(_conn, "world_boss", "cultivator_count", "INTEGER NOT NULL DEFAULT 1")
     await _ensure_column(_conn, "pvp_ratings", "reputation", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "pvp_ratings", "week_reputation", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "pvp_ratings", "week_tag", "TEXT")
     await _ensure_column(_conn, "item_instances", "enhance_level", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "item_instances", "natal_level", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "item_instances", "bound", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "item_instances", "status", "TEXT NOT NULL DEFAULT 'normal'")
+    await _ensure_column(_conn, "auctions", "created_at", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "auctions", "settled_at", "INTEGER NOT NULL DEFAULT 0")
+    # 拍卖新增列先迁移再建索引，兼容旧库从 T2.6/T2.7 直接升级。
+    await _conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_auctions_status_created "
+        "ON auctions(status, created_at, id)")
+    await _conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_auctions_audit_sold "
+        "ON auctions(status, settled_at, seller_id, current_bidder)")
+    await _ensure_column(_conn, "social_bonds", "expires_at", "INTEGER")
+    await _ensure_column(_conn, "social_bonds", "activated_at", "INTEGER")
+    await _ensure_column(_conn, "social_bonds", "initiator_id", "INTEGER")
+    await _ensure_column(_conn, "social_bonds", "confirmed_at", "INTEGER")
+    await _ensure_column(_conn, "social_bonds", "dissolved_at", "INTEGER")
+    await _ensure_column(_conn, "social_bonds", "active_days", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "social_bonds", "last_active_day", "TEXT")
+    await _conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bonds_pending_expire "
+        "ON social_bonds(kind, status, expires_at)")
     await _ensure_column(_conn, "sect_members", "donate_day", "TEXT")
     await _ensure_column(_conn, "sect_members", "donate_today", "INTEGER NOT NULL DEFAULT 0")
     # 迁移时留空(NULL)而非填默认值，使部署前的在途历练落入 _resolve 的"旧 run"兼容分支
@@ -416,6 +680,13 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "dungeon_jobs", "start_hp", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "start_mp", "INTEGER")
     await _ensure_column(_conn, "ascension", "last_trial_week", "TEXT")
+    await _ensure_column(_conn, "ascension", "overflow_remainder", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "ascension", "overflow_week", "TEXT")
+    await _ensure_column(_conn, "ascension", "overflow_week_points", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "ascension", "tianmen_level", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "ascension", "tianmen_progress", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "tribulation_sessions", "guarantee_bonus", "REAL NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "tribulation_sessions", "reward_flag", "TEXT")
     await _migrate_inventory_bound(_conn)
     await _migrate_sect_outposts_pk(_conn)
     await _conn.commit()
@@ -423,6 +694,7 @@ async def init_db(path: str = None):
     _read_conn = await aiosqlite.connect(db_path)
     _read_conn.row_factory = aiosqlite.Row
     await _read_conn.execute("PRAGMA query_only=ON;")
+    _generation += 1
 
 
 async def close_db():
@@ -449,6 +721,17 @@ def _rc():
 def _lock():
     assert _write_lock is not None, "DB 未初始化，请先 await init_db()"
     return _write_lock
+
+
+def generation() -> int:
+    """当前 DB 初始化代次；服务层缓存据此避开跨测试库串值。"""
+    return _generation
+
+
+async def _ensure_game_flag(conn, key: str, value: str):
+    await conn.execute(
+        "INSERT OR IGNORE INTO game_flags(key, value) VALUES(?,?)",
+        (key, value))
 
 
 async def _ensure_column(conn, table: str, column: str, definition: str):

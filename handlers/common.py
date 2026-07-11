@@ -1,5 +1,6 @@
-"""交互层共用组件：主菜单、进度条、消息编辑（回调幂等）。"""
 from __future__ import annotations
+
+"""交互层共用组件：主菜单、进度条、消息编辑（回调幂等）。"""
 
 import secrets
 import time
@@ -93,13 +94,16 @@ def main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🪙 商店", callback_data="nav:shop"),
          InlineKeyboardButton(text="🎒 储物袋", callback_data="nav:bag")],
         [InlineKeyboardButton(text="📜 悬赏", callback_data="nav:quest"),
+         InlineKeyboardButton(text="🤝 师徒", callback_data="nav:master")],
+        [InlineKeyboardButton(text="💞 道侣", callback_data="nav:partner"),
          InlineKeyboardButton(text="⛩️ 宗门", callback_data="nav:sect")],
         [InlineKeyboardButton(text="🧭 道途", callback_data="nav:path"),
          InlineKeyboardButton(text="🌌 飞升", callback_data="nav:ascension")],
         [InlineKeyboardButton(text="🗓️ 活动", callback_data="nav:weekly"),
          InlineKeyboardButton(text="🏷️ 坊市", callback_data="nav:market")],
-        [InlineKeyboardButton(text="⚔️ 宗门战", callback_data="nav:sectwar"),
-         InlineKeyboardButton(text="📖 指南", callback_data="nav:help")],
+        [InlineKeyboardButton(text="🔨 拍卖", callback_data="nav:auction"),
+         InlineKeyboardButton(text="⚔️ 宗门战", callback_data="nav:sectwar")],
+        [InlineKeyboardButton(text="📖 指南", callback_data="nav:help")],
     ])
 
 

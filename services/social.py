@@ -1,5 +1,6 @@
-"""低频群播报与天梯 DM 通知队列。"""
 from __future__ import annotations
+
+"""低频群播报与天梯 DM 通知队列。"""
 
 import json
 import logging
@@ -119,6 +120,11 @@ def _group_text(event_type: str, payload: dict) -> str:
     if event_type == "breakthrough.big_success":
         label = payload.get("label") or R.realm_label(payload.get("target_realm", 0), payload.get("target_stage", 0))
         return f"✨ {name} 破境成功，晋入「{label}」。"
+    if event_type == "breakthrough.heart_success":
+        label = payload.get("label") or R.realm_label(payload.get("target_realm", 0), payload.get("target_stage", 0))
+        return f"🌀 {name} 直面心魔而不退，道心通明，晋入「{label}」。"
+    if event_type == "breakthrough.heart_fail":
+        return f"🌀 {name} 直面心魔失守，道基震荡，来日仍可再证本心。"
     if event_type == "explore.boss_win":
         return f"🐲 {name} 斩杀妖王「{payload.get('mob', '妖王')}」，满身风尘而归。"
     if event_type == "explore.rare_drop":
@@ -134,12 +140,54 @@ def _group_text(event_type: str, payload: dict) -> str:
         title = payload.get("title") or ""
         tail = f"，尊号「{title}」传开" if title else ""
         return f"🌌 {name} 飞升精进，「{passive}」圆满{tail}。"
+    if event_type == "ascension.tianmen":
+        level = int(payload.get("level") or 0)
+        title = payload.get("title") or ""
+        tail = f"，得称「{title}」" if title else ""
+        return f"🌌 {name} 叩问天门，连开至第 {level} 重{tail}。"
+    if event_type == "mentor.active":
+        disciple = payload.get("disciple_name", "徒弟")
+        return f"🤝 {name} 收「{disciple}」为入室弟子，传承香火自此相续。"
+    if event_type == "mentor.milestone":
+        disciple = payload.get("disciple_name", "徒弟")
+        milestone = "金丹" if payload.get("milestone") == "jindan" else "元婴"
+        return f"📜 {name} 门下弟子「{disciple}」破入{milestone}，传承有成。"
+    if event_type == "mentor.graduate":
+        disciple = payload.get("disciple_name", "徒弟")
+        return f"🎓 {name} 门下弟子「{disciple}」功成出师，山门桃李又添一枝。"
+    if event_type == "mentor.title":
+        title = payload.get("title", "桃李名师")
+        return f"🏅 {name} 桃李渐成林，获尊号「{title}」。"
+    if event_type == "partner.active":
+        partner = payload.get("partner_name", "道侣")
+        return f"💞 {name} 与「{partner}」结为道侣，同参大道，自此灵犀相照。"
+    if event_type == "partner.dissolved":
+        partner = payload.get("partner_name", "旧侣")
+        return f"💔 {name} 与「{partner}」解契，各自归山，因缘暂歇。"
+    if event_type == "natal.bind":
+        return f"🔮 {name} 祭炼「{payload.get('item', '法宝')}」为本命法宝，神魂相契。"
+    if event_type == "natal.unbind":
+        return f"🔮 {name} 斩去「{payload.get('item', '法宝')}」本命牵系，灵光暂敛。"
+    if event_type == "auction.high_price_sale":
+        item = payload.get("item", "拍品")
+        qty = payload.get("qty") or 1
+        return (
+            f"🔨 {name} 于拍卖行拍下「{item}」×{qty}，"
+            f"落槌价 {payload.get('price')} 灵石，满堂皆惊。")
     return ""
 
 
 def _dm_text(event_type: str, payload: dict) -> str:
     if event_type == "pvp.rating_notice":
         return str(payload.get("text") or "")
+    if event_type == "auction.outbid":
+        return (
+            f"🔨 你关注的拍卖 #{payload.get('auction_id')}「{payload.get('item', '拍品')}」"
+            f"已被超价：{payload.get('old_bid')} → {payload.get('new_bid')} 灵石。")
+    if event_type == "auction.closing":
+        return (
+            f"⏳ 你关注的拍卖 #{payload.get('auction_id')}「{payload.get('item', '拍品')}」"
+            f"约 {payload.get('minutes')} 分钟后收槌，当前 {payload.get('price')} 灵石。")
     return ""
 
 

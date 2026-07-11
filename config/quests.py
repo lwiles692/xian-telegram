@@ -1,7 +1,78 @@
-"""悬赏任务与成就配置。数值初版可调。"""
 from __future__ import annotations
 
+"""悬赏任务与成就配置。数值初版可调。"""
+
+ONBOARDING_WINDOW_DAYS = 7
+
+ONBOARDING_QUESTS = {
+    "onboarding_daily": {
+        "name": "初问山门",
+        "period": "onboarding",
+        "unlock_day": 1,
+        "event": "daily.checkin",
+        "target": 1,
+        "reward": {"stone": 80, "stamina": 20, "bound_items": {"疗伤丹": 1}},
+    },
+    "onboarding_explore": {
+        "name": "初试锋芒",
+        "period": "onboarding",
+        "unlock_day": 1,
+        "event": "explore.win",
+        "target": 1,
+        "reward": {"stone": 100, "bound_items": {"补灵丹": 1}},
+    },
+    "onboarding_craft": {
+        "name": "炉前识火",
+        "period": "onboarding",
+        "unlock_day": 2,
+        "event": "craft.done",
+        "target": 1,
+        "reward": {"stone": 120, "bound_items": {"灵草": 3, "玄铁矿": 2}},
+    },
+    "onboarding_dungeon": {
+        "name": "探幽入境",
+        "period": "onboarding",
+        "unlock_day": 3,
+        "event": "dungeon.clear",
+        "target": 1,
+        "reward": {"stone": 140, "stamina": 20, "bound_items": {"妖丹": 1}},
+    },
+    "onboarding_pvp": {
+        "name": "论道初胜",
+        "period": "onboarding",
+        "unlock_day": 4,
+        "event": "pvp.win",
+        "target": 1,
+        "reward": {"stone": 160, "bound_items": {"虎力丹": 1}},
+    },
+    "onboarding_market": {
+        "name": "坊市试摊",
+        "period": "onboarding",
+        "unlock_day": 5,
+        "event": "market.list",
+        "target": 1,
+        "reward": {"stone": 160, "bound_items": {"凝神丹": 1}},
+    },
+    "onboarding_sect": {
+        "name": "拜入宗门",
+        "period": "onboarding",
+        "unlock_day": 6,
+        "event": "sect.join",
+        "target": 1,
+        "reward": {"stone": 180, "stamina": 20, "bound_items": {"天材地宝": 1}},
+    },
+    "onboarding_boss": {
+        "name": "合击妖王",
+        "period": "onboarding",
+        "unlock_day": 7,
+        "event": "world_boss.challenge",
+        "target": 1,
+        "reward": {"stone": 220, "bound_items": {"筑基丹": 1}},
+    },
+}
+
 QUESTS = {
+    **ONBOARDING_QUESTS,
     "daily_explore": {
         "name": "巡山斩妖",
         "period": "daily",

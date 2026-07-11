@@ -1,12 +1,13 @@
-"""玩家一口价坊市（v2 M5）。"""
 from __future__ import annotations
+
+"""玩家一口价坊市（v2 M5）。"""
 
 import logging
 import time
 
 from config.items import is_tradable, item_name
 from models import db
-from services import character
+from services import character, game_events
 
 log = logging.getLogger("xian.market")
 
@@ -61,6 +62,10 @@ async def create_listing(seller_id: int, item_key: str, qty: int, price: int, no
             (seller_id, item_key, qty, price, now, now))
         listing_id = cur.lastrowid
         await cur.close()
+        await game_events.emit_conn(
+            conn, seller_id, "market.list",
+            {"listing_id": listing_id, "item_key": item_key, "qty": qty, "amount": 1},
+            now)
         return {"status": "ok", "listing_id": listing_id, "item": item_name(item_key),
                 "qty": qty, "price": price}
 

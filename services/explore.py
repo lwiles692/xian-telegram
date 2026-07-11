@@ -1,14 +1,16 @@
-"""历练：开始耗精力 → 等待约 10 分钟 → 结算战斗与掉落。"""
 from __future__ import annotations
+
+"""历练：开始耗精力 → 按地图时长等待 → 结算战斗与掉落。"""
 
 import random
 import time
 
+from config import daohang as DAOHANG
 from config.events import ENCOUNTER_RATE, ENCOUNTERS
 from config.maps import MAPS
 from config.realms import realm_label
 from models import db
-from services import activity, character, game_events, sect_war, settle
+from services import activity, bonds as bonds_service, character, game_events, sect_war, settle
 from services.combat import Combatant, simulate
 
 # 历练时长与遭遇密度按难度绑定（#20）：开局即定遭遇计划与时长，结算复用。
@@ -20,12 +22,14 @@ DIFFICULTY_PLAN = {
 }
 SWEEP_UNLOCK_WINS = 3
 RARE_DROP_KEYS = {"筑基丹", "金丹", "元婴丹", "天材地宝", "阴风石", "幽冥草",
-                  "白骨精华", "腐泽妖核", "雷纹玄铁", "劫火残晶", "天魔残页", "古战魂晶"}
+                  "白骨精华", "腐泽妖核", "雷纹玄铁", "劫火残晶", "天魔残页", "古战魂晶",
+                  "雾泽虚砂", "裂海空髓", "混沌残核", "炼虚装备图纸残页",
+                  "太初虚刃图纸", "玄冥空甲图纸", "混沌灵佩图纸"}
 
 
 def _plan_minutes(m, is_boss: bool, n_enc: int) -> float:
     plan = DIFFICULTY_PLAN.get(m.get("difficulty", "易"), DIFFICULTY_PLAN["易"])
-    lo, hi = plan["minutes"]
+    lo, hi = m.get("minutes", plan["minutes"])
     elo, ehi = plan["enc"]
     if is_boss:
         return hi                       # 妖王战耗时最长
@@ -58,6 +62,11 @@ def _roll_drops(m, rng, drop_bonus: float = 0.0) -> dict:
         if rng.random() < min(100.0, weight * (1 + drop_bonus)) / 100.0:
             drops[key] = drops.get(key, 0) + rng.randint(qmin, qmax)
     return drops
+
+
+def _regular_daohang_reward(m: dict, is_boss: bool) -> int:
+    base = DAOHANG.EXPLORE_DAOHANG_BY_DIFFICULTY.get(m.get("difficulty", "易"), 0)
+    return base + (DAOHANG.EXPLORE_BOSS_BONUS if is_boss else 0)
 
 
 def _combatant_from_mob(src) -> Combatant:
@@ -415,7 +424,7 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
             break
         player.hp = max(1, result["a_hp"])
 
-    reward = {"stone": 0, "cult": 0, "drops": {}}
+    reward = {"stone": 0, "cult": 0, "drops": {}, "daohang": 0}
     if win:
         mult = 2 if is_boss else 1
         reward_mult = float(event_effect.get("reward_mult", 1.0) or 1.0)
@@ -425,8 +434,12 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
         outpost = await sect_war.bonuses_for_user(user_id)
         drop_pct = sect_war.total_drop_pct(welfare["drop_pct"], outpost)
         drops = _roll_drops(m, rng, drop_pct + float(event_effect.get("drop_bonus", 0.0) or 0.0))
+        daohang = 0
         if conn is not None:
             await character._grant_reward_conn(conn, user_id, stone, cult, drops)
+            daohang = await character.grant_regular_daohang_conn(
+                conn, user_id, _regular_daohang_reward(m, is_boss),
+                "explore_regular", now, realm=char.realm)
             contribution = int(event_effect.get("contribution", 0) or 0)
             if contribution:
                 await conn.execute(
@@ -434,7 +447,10 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
                     (contribution, user_id))
         else:
             await character.grant_reward(user_id, stone, cult, drops)
-        reward = {"stone": stone, "cult": cult, "drops": drops}
+            daohang = await character.grant_regular_daohang(
+                user_id, _regular_daohang_reward(m, is_boss),
+                "explore_regular", now, realm=char.realm)
+        reward = {"stone": stone, "cult": cult, "drops": drops, "daohang": daohang}
 
     # 严格事件顺序（#24 P1）：先得「战斗结束状态」(finish_at，落 20% 重伤地板)，
     # 再从该状态自然回复到领取时刻 now。领取前已禁服恢复丹，故无需合并。
@@ -444,6 +460,9 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
     final_hp, _ = settle.regen_resource(combat_hp, max_hp, anchor, now, settle.HP_REGEN_SECONDS_PER_FULL)
     final_mp, _ = settle.regen_resource(combat_mp, max_mp, anchor, now, settle.MP_REGEN_SECONDS_PER_FULL)
     await character.write_vitals(user_id, final_hp, final_mp, now, conn=conn)
+    bond_activity = None
+    if conn is not None:
+        bond_activity = await bonds_service.record_disciple_activity(conn, user_id, now)
     if conn is not None and win:
         payload = {
             "map_key": map_key,
@@ -470,4 +489,5 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
             "battle_hp_before": cur_hp, "battle_hp_after": max(0, player.hp),
             "battle_mp_before": cur_mp, "battle_mp_after": max(0, player.mp),
             "hp_after": final_hp, "mp_after": final_mp,
-            "max_hp": max_hp, "max_mp": max_mp}
+            "max_hp": max_hp, "max_mp": max_mp,
+            "bond_activity": bond_activity}

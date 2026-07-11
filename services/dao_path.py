@@ -5,7 +5,7 @@ import time
 
 from config import dao_paths as CFG
 from models import db
-from services import game_events
+from services import ascension as ascension_service, game_events
 
 
 async def list_paths(user_id: int) -> list[dict]:
@@ -98,15 +98,16 @@ async def rank_up(user_id: int, path_key: str = None, now: int = None) -> dict:
             if have_points < ascension_points:
                 return {"status": "no_ascension_points", "need": ascension_points,
                         "have": have_points}
+            spent_ok = await ascension_service.spend_points_conn(
+                conn, user_id, ascension_points, "dao_path_master", now,
+                {"path_key": row["path_key"], "target_rank": target_rank})
+            if not spent_ok:
+                raise RuntimeError("道途升阶扣除飞升点失败")
         await conn.execute(
             "UPDATE characters SET daohang=daohang-? WHERE user_id=?",
             (cost["daohang"], user_id))
         for key, qty in cost.get("items", {}).items():
             await _consume_item_conn(conn, user_id, key, qty)
-        if ascension_points:
-            await conn.execute(
-                "UPDATE ascension SET points=points-?, updated_at=? WHERE user_id=?",
-                (ascension_points, now, user_id))
         await conn.execute(
             "UPDATE dao_paths SET rank=? WHERE user_id=? AND path_key=?",
             (target_rank, user_id, row["path_key"]))

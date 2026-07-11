@@ -64,7 +64,8 @@ def _result_text(res: dict) -> str:
     if s == "ok" and "cap_left" in res:
         return f"捐输 {res['stone']} 灵石，得贡献 +{res['contribution']}（今日还可换 {res['cap_left']}）。"
     if s == "ok" and "contribution" in res:
-        return f"宗门任务完成，贡献 +{res['contribution']}，灵石 +{res['stone']}。"
+        daohang = f"，道行 +{res['daohang']}" if res.get("daohang") else ""
+        return f"宗门任务完成，贡献 +{res['contribution']}，灵石 +{res['stone']}{daohang}。"
     if s == "ok" and "item" in res:
         return f"兑换 {res['item']}×{res['qty']}，消耗贡献 {res['cost']}。"
     if s == "upgraded":
