@@ -125,6 +125,8 @@ async def test_lianxu_success_clears_big_fail_streak_after_tribulation(temp_db, 
     assert start["status"] == "tribulation_choice"
     assert start["guarantee_bonus"] == pytest.approx(0.20)
     assert res["status"] == "big_success"
+    assert res["pill_used"] == "炼虚丹"
+    assert cultivate._bt_text(res).startswith(cultivate._PILL_CONSUME_TEXT["炼虚丹"])
     assert row["realm"] == 5
     assert row["stage"] == 0
     assert row["big_fail_streak"] == 0

@@ -283,6 +283,7 @@ async def try_advance(user_id: int, now: int = None) -> dict:
                 return {"status": "big_success", "rate": rate, "tribulation": trib,
                         "label": realm_label(nxt[0], nxt[1]),
                         "tribulation_log": tribulation["log"],
+                        "pill_used": pill,
                         "guarantee_bonus": guarantee_bonus,
                         "mentor_milestone": mentor_milestone}
             return await _fail(
@@ -374,6 +375,7 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
                      "buff": HEART_TRIBULATION_BUFF_NAME}, now)
             return {"status": "big_success", "rate": row["rate"], "tribulation": True,
                     "label": label, "tribulation_log": logs,
+                    "pill_used": BIG_BREAKTHROUGH[row["target_realm"]]["pill"],
                     "guarantee_bonus": row["guarantee_bonus"],
                     "heart_reward": heart_reward, "daohang": daohang,
                     "buff": HEART_TRIBULATION_BUFF_NAME if heart_reward else None,

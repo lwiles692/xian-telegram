@@ -78,6 +78,15 @@ async def render_cultivate(user_id: int):
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+_PILL_CONSUME_TEXT = {
+    "筑基丹": "🔥 筑基丹化入丹田，重塑筋骨，根基渐固！",
+    "金丹": "🔥 金丹化入丹田，龙虎交汇，金丹初凝！",
+    "元婴丹": "🔥 元婴丹化作琼浆，神识内敛，元婴始成！",
+    "化神丹": "🔥 化神丹融于百脉，神魂脱壳，化神可期！",
+    "炼虚丹": "🔥 炼虚丹化入紫府，虚实相生，炼虚在望！",
+}
+
+
 def _bt_text(res: dict) -> str:
     s = res["status"]
     if s == "need_cult":
@@ -114,16 +123,19 @@ def _bt_text(res: dict) -> str:
         return f"📈 水到渠成，道友晋入 {res['label']}！"
     if s == "big_success":
         tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
+        pill_line = _PILL_CONSUME_TEXT.get(res.get("pill_used", ""), "")
+        if pill_line:
+            pill_line += "\n"
         rate = f"\n{_rate_text(res)}" if _rate_text(res) else ""
         heart = _heart_success_text(res)
         if res["tribulation"]:
             trial = _trial_from_log(tail)
             if trial == "神魂劫":
-                return f"🌀 神魂劫已尽，心魔归寂——道友破妄凝神，臻至 {res['label']}！{heart}{rate}{tail}"
+                return f"{pill_line}🌀 神魂劫已尽，心魔归寂——道友破妄凝神，臻至 {res['label']}！{heart}{rate}{tail}"
             if trial == "虚空劫":
-                return f"🌌 虚空劫已尽，肉身归真——道友踏破虚无，臻至 {res['label']}！{heart}{rate}{tail}"
-            return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！{heart}{rate}{tail}"
-        return f"✨ 灵气灌顶，道友冲破桎梏，迈入 {res['label']}！{heart}{rate}"
+                return f"{pill_line}🌌 虚空劫已尽，肉身归真——道友踏破虚无，臻至 {res['label']}！{heart}{rate}{tail}"
+            return f"{pill_line}⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！{heart}{rate}{tail}"
+        return f"{pill_line}✨ 灵气灌顶，道友冲破桎梏，迈入 {res['label']}！{heart}{rate}"
     if s == "big_fail":
         tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
         rate = f"\n{_rate_text(res)}" if _rate_text(res) else ""
