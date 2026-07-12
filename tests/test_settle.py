@@ -26,12 +26,26 @@ def test_regen_anchor_keeps_remainder():
 
 
 def test_regen_daily_budget_is_about_400():
-    val, _ = settle.regen_stamina(0, 0, 1000, 24 * 3600)
+    val, _ = settle.regen_stamina(0, 0, 1000, 24 * 3600, realm=0)
     assert val == 400
 
 
 def test_regen_already_full():
     assert settle.regen_stamina(100, 0, 100, 999999) == (100, 999999)
+
+
+def test_regen_curve_reaches_each_realm_cap_near_target_time():
+    target_hours = (6.0, 6.8, 7.6, 8.4, 9.2, 10.0)
+
+    for realm, hours in enumerate(target_hours):
+        cap = R.STAMINA_CAP[realm]
+        val, _ = settle.regen_stamina(0, 0, cap, int(hours * 3600), realm=realm)
+
+        assert val >= cap - 1
+
+
+def test_regen_preserves_unbounded_reward_stamina_and_pauses_recovery():
+    assert settle.regen_stamina(150, 0, 100, 999999, realm=0) == (150, 999999)
 
 
 def test_seclusion_offline_cap():

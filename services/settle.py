@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from config import realms as R
 
-STAMINA_REGEN_SECONDS = 216   # 1 点 / 3.6 分钟，约 400 点 / 日
+STAMINA_REGEN_SECONDS = R.STAMINA_REGEN_SECONDS[0]  # 炼气基线；其余境界见配置表
 OFFLINE_CAP_HOURS = 12        # 闭关离线上限
 # 气血/法力自然回复（#24）：按 max 的百分比/分，跨境界自动缩放。
 # 0→满 所需秒数：气血 2000s(3%/分)、法力 1000s(6%/分，快于气血)。
@@ -76,16 +76,24 @@ def overflow_to_daohang(realm: int, stage: int, cur_cult: int, gain: int,
     return kept, daohang
 
 
-def regen_stamina(stamina: int, stamina_at: int, cap: int, now: int):
+def stamina_regen_seconds(realm: int) -> int:
+    """返回当前境界每恢复 1 点精力所需秒数。"""
+    return R.STAMINA_REGEN_SECONDS.get(realm, STAMINA_REGEN_SECONDS)
+
+
+def regen_stamina(stamina: int, stamina_at: int, cap: int, now: int,
+                  realm: int = 0):
     """按时间戳惰性恢复精力，返回 (新精力, 新锚点时间戳)。"""
     if stamina >= cap:
-        return cap, now
-    gained = (now - stamina_at) // STAMINA_REGEN_SECONDS
+        # 奖励精力允许无限超过上限；超限期间不恢复，也不积攒离线恢复进度。
+        return stamina, now
+    interval = stamina_regen_seconds(realm)
+    gained = (now - stamina_at) // interval
     if gained <= 0:
         return stamina, stamina_at
     new_val = min(cap, stamina + gained)
     # 锚点只前移已消耗的整数刻度，避免丢失零头进度。
-    new_at = stamina_at + gained * STAMINA_REGEN_SECONDS
+    new_at = stamina_at + gained * interval
     if new_val >= cap:
         new_at = now
     return new_val, new_at
