@@ -8,7 +8,8 @@ from config import daohang as DAOHANG
 from config.items import item_name
 from config.sects import (CREATE_REALM, CREATE_STONE_COST, DONATE_DAILY_CONTRIBUTION_CAP,
                           DONATE_STONE_PER_CONTRIBUTION, SECT_SHOP, TASK_CONTRIBUTION,
-                          TASK_STONE_REWARD, upgrade_cost, upgrade_stone_cost)
+                          TASK_STAMINA_REWARD, TASK_STONE_REWARD, upgrade_cost,
+                          upgrade_stone_cost)
 from models import db
 from services import character, game_events
 
@@ -138,8 +139,11 @@ async def task(user_id: int, now: int = None) -> dict:
             (TASK_STONE_REWARD, user_id))
         daohang = await character.grant_regular_daohang_conn(
             conn, user_id, DAOHANG.SECT_TASK_DAOHANG, "sect_task", now)
+        stamina = await character.grant_stamina_conn(
+            conn, user_id, TASK_STAMINA_REWARD, now)
         return {"status": "ok", "contribution": TASK_CONTRIBUTION,
-                "stone": TASK_STONE_REWARD, "daohang": daohang}
+                "stone": TASK_STONE_REWARD, "daohang": daohang,
+                "stamina": stamina}
 
 
 async def redeem(user_id: int, item_key: str) -> dict:

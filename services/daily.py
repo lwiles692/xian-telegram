@@ -11,6 +11,7 @@ from services import character as character_service, game_events
 HUASHEN_AID_ITEM = "化神丹"
 YUANYING_REALM = 3
 HUASHEN_REALM = 4
+DAILY_STAMINA_REWARD = 10
 
 
 def _day(ts: int) -> str:
@@ -67,6 +68,8 @@ async def checkin(user_id: int, now: int = None) -> dict:
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
             (reward, user_id))
+        stamina = await character_service.grant_stamina_conn(
+            conn, user_id, DAILY_STAMINA_REWARD, now)
         aid = await _maybe_grant_huashen_aid_conn(conn, user_id, char)
         await game_events.emit_conn(
             conn, user_id, "daily.checkin", {"streak": streak, "amount": 1}, now)
@@ -74,5 +77,6 @@ async def checkin(user_id: int, now: int = None) -> dict:
             "status": "ok",
             "streak": streak,
             "stone": reward,
+            "stamina": stamina,
             "extra_items": [aid] if aid else [],
         }

@@ -416,13 +416,24 @@ def test_lianxu_maps_are_better_growth_route_than_huashen_maps():
 
 
 def test_lianxu_progression_profile_hits_weeks_target():
-    """spec-v3 T0.11：普通活跃 6~9 周，高活跃不低于 4 周且更快。"""
+    """新精力曲线：普通活跃 4~5 周，高活跃 2~3 周，理论满勤不少于 2 周。"""
     profile = B.lianxu_progression_profile()
     ordinary_days = profile["ordinary"]["total_days"]
     high_days = profile["high"]["total_days"]
+    maximum_days = profile["maximum"]["total_days"]
 
-    assert 42 <= ordinary_days <= 63
-    assert 28 <= high_days < ordinary_days
+    assert 28 <= ordinary_days <= 35
+    assert 14 <= high_days <= 21
+    assert 14 <= maximum_days < high_days < ordinary_days
+
+
+def test_lianxu_stamina_supply_profile_tracks_regen_and_daily_rewards():
+    supply = B.lianxu_stamina_supply_profile()
+
+    assert supply["daily_reward"] == 80
+    assert supply["one_session"] == 360
+    assert supply["two_sessions"] == 640
+    assert supply["maximum"] == 750
 
 
 def test_lianxu_first_breakthrough_profile_hits_cycle_targets():

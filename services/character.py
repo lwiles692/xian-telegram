@@ -82,7 +82,28 @@ def _settled_stamina(row, now: int = None, welfare: dict = None):
     now = int(time.time()) if now is None else now
     welfare = welfare or sect_welfare_config(0)
     cap = R.STAMINA_CAP[row["realm"]] + welfare["stamina_bonus"]
-    return settle.regen_stamina(row["stamina"], row["stamina_at"], cap, now)
+    return settle.regen_stamina(
+        row["stamina"], row["stamina_at"], cap, now, realm=row["realm"])
+
+
+async def grant_stamina_conn(conn, user_id: int, amount: int, now: int = None) -> int:
+    """结算自然恢复后发放无上限奖励精力；超限时暂停自然恢复。"""
+    if amount <= 0:
+        return 0
+    now = int(time.time()) if now is None else int(now)
+    row = await _select_character(conn, user_id)
+    if not row:
+        return 0
+    welfare = await _sect_welfare(conn, user_id)
+    stamina, stamina_at = _settled_stamina(row, now, welfare)
+    cap = R.STAMINA_CAP[row["realm"]] + welfare["stamina_bonus"]
+    stamina += amount
+    if stamina >= cap:
+        stamina_at = now
+    await conn.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (stamina, stamina_at, user_id))
+    return amount
 
 
 def _from_row(row, stamina: int = None, stamina_at: int = None) -> Character:
@@ -587,7 +608,8 @@ async def get_at(user_id: int, now: int = None):
     now = int(time.time()) if now is None else now
     welfare = await sect_welfare(user_id)
     cap = R.STAMINA_CAP[row["realm"]] + welfare["stamina_bonus"]
-    new_stam, new_at = settle.regen_stamina(row["stamina"], row["stamina_at"], cap, now)
+    new_stam, new_at = settle.regen_stamina(
+        row["stamina"], row["stamina_at"], cap, now, realm=row["realm"])
     if new_stam != row["stamina"] or new_at != row["stamina_at"]:
         await db.execute("UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
                          (new_stam, new_at, user_id))

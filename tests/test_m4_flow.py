@@ -164,7 +164,8 @@ async def test_sect_war_rejects_no_stamina_before_combat_and_records_window(temp
     await sect.create(uid, "疲兵宗", now=1000)
     await db.execute(
         "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
-        (0, WAR_OPEN - (sect_war.CFG.WAR_STAMINA_COST - 1) * settle.STAMINA_REGEN_SECONDS, uid))
+        (0, WAR_OPEN - (sect_war.CFG.WAR_STAMINA_COST - 1)
+         * settle.stamina_regen_seconds(4), uid))
 
     res = await sect_war.capture(uid, "altar", now=WAR_OPEN)
     row = await db.fetchone("SELECT stamina, stamina_at FROM characters WHERE user_id=?", (uid,))
@@ -192,7 +193,8 @@ async def test_sect_war_settles_stamina_regen_before_cost(temp_db):
     await sect.create(uid, "回气宗", now=1000)
     await db.execute(
         "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
-        (0, WAR_OPEN - sect_war.CFG.WAR_STAMINA_COST * settle.STAMINA_REGEN_SECONDS, uid))
+        (0, WAR_OPEN - sect_war.CFG.WAR_STAMINA_COST
+         * settle.stamina_regen_seconds(4), uid))
 
     res = await sect_war.capture(uid, "altar", now=WAR_OPEN)
     row = await db.fetchone("SELECT stamina, stamina_at FROM characters WHERE user_id=?", (uid,))

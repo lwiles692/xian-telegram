@@ -89,7 +89,7 @@ async def test_七日引导_签到事件领奖给绑定物与精力(temp_db):
     assert daily_quest["ready"] is True
     assert claimed["status"] == "ok"
     assert after["spirit_stone"] == before["spirit_stone"] + checked["stone"] + 80
-    assert after["stamina"] == before["stamina"] + 20
+    assert after["stamina"] == before["stamina"] + checked["stamina"] + 20
     assert await character.item_qty(uid, "疗伤丹", bound=1) == 1
     assert await character.item_qty(uid, "疗伤丹", bound=0) == 0
     listed = await market.create_listing(uid, "疗伤丹", 1, 10, now=start + 1)

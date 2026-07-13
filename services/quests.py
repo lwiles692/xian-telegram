@@ -6,11 +6,10 @@ import sqlite3
 import time
 
 from config import bonds as BONDS
-from config import realms as R
 from config.items import item_name
 from config.quests import ACHIEVEMENTS, ONBOARDING_WINDOW_DAYS, QUESTS
 from models import db
-from services import bonds as bonds_service, character, settle
+from services import bonds as bonds_service, character
 
 DAY_SECONDS = 24 * 3600
 
@@ -122,19 +121,7 @@ async def _grant_reward_conn(conn, user_id: int, reward: dict, now: int = None):
             (stone, user_id))
     stamina = int(reward.get("stamina", 0) or 0)
     if stamina:
-        cur = await conn.execute(
-            "SELECT realm, stamina, stamina_at FROM characters WHERE user_id=?",
-            (user_id,))
-        row = await cur.fetchone()
-        await cur.close()
-        if row:
-            cap = R.STAMINA_CAP[row["realm"]]
-            current, stamina_at = settle.regen_stamina(row["stamina"], row["stamina_at"], cap, now)
-            gained = min(stamina, max(0, cap - current))
-            if gained:
-                await conn.execute(
-                    "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
-                    (current + gained, stamina_at, user_id))
+        await character.grant_stamina_conn(conn, user_id, stamina, now)
     for key, qty in (reward.get("items") or {}).items():
         if qty <= 0:
             continue
