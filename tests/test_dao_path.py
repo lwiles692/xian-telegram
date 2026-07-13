@@ -3,6 +3,7 @@ import pytest_asyncio
 
 from config import dao_paths as CFG
 from config import buffs as BUFFS
+from handlers import dao_path as dao_path_handler
 from models import db
 from services import ascension, character, dao_path
 
@@ -21,6 +22,14 @@ def test_dao_path_config_covers_five_paths_with_entry_scale():
     for path in CFG.DAO_PATHS.values():
         first = path["bonuses"][0]
         assert any(0.02 <= v <= 0.03 for k, v in first.items() if k.endswith("_pct"))
+
+
+def test_dao_path_bonus_text_uses_chinese_labels():
+    text = dao_path_handler._bonus_text({"seclusion_pct": 0.11, "spd_pct": 0.06})
+
+    assert text == "闭关加成+11%、速度加成+6%"
+    assert "seclusion_pct" not in text
+    assert "spd_pct" not in text
 
 
 @pytest.mark.asyncio

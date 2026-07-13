@@ -6,6 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import dao_paths as CFG
+from config.items import format_bonus
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
                              button_grid, consume_action_callback,
                              guard_private_callback, guard_private_message,
@@ -18,7 +19,7 @@ router = Router()
 def _bonus_text(bonuses: dict) -> str:
     if not bonuses:
         return "无"
-    return "、".join(f"{k}+{v * 100:.0f}%" for k, v in bonuses.items())
+    return format_bonus(bonuses)
 
 
 async def render_path(user_id: int):
