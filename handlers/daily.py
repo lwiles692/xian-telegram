@@ -5,6 +5,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from config import copy as COPY
 from handlers.common import NEED_START
 from services import daily
 
@@ -17,8 +18,9 @@ def _ok_text(res: dict) -> str:
         f"灵石 +{res['stone']}，精力 +{res['stamina']}。"
     ]
     for extra in res.get("extra_items", []):
-        if extra.get("item") == daily.HUASHEN_AID_ITEM:
-            lines.append("凝婴问道补给：化神丹 ×1（绑定）。")
+        aid_text = COPY.DAILY_AID_TEXT.get(extra.get("item"))
+        if aid_text:
+            lines.append(aid_text)
     return "\n".join(lines)
 
 

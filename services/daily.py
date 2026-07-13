@@ -9,8 +9,10 @@ from models import db
 from services import character as character_service, game_events
 
 HUASHEN_AID_ITEM = "化神丹"
+LIANXU_AID_ITEM = "炼虚丹"
 YUANYING_REALM = 3
 HUASHEN_REALM = 4
+LIANXU_REALM = 5
 DAILY_STAMINA_REWARD = 10
 
 
@@ -18,31 +20,45 @@ def _day(ts: int) -> str:
     return time.strftime("%Y-%m-%d", time.localtime(ts))
 
 
-async def _maybe_grant_huashen_aid_conn(conn, user_id: int, char) -> dict | None:
-    last_stage = R.num_stages(YUANYING_REALM) - 1
-    if char["realm"] != YUANYING_REALM or char["stage"] != last_stage:
+async def _maybe_grant_aid_conn(conn, user_id: int, char, source_realm: int,
+                                target_realm: int, item_key: str,
+                                reason: str) -> dict | None:
+    last_stage = R.num_stages(source_realm) - 1
+    if char["realm"] != source_realm or char["stage"] != last_stage:
         return None
-    if char["cultivation"] < R.advance_cost(YUANYING_REALM, last_stage):
+    if char["cultivation"] < R.advance_cost(source_realm, last_stage):
         return None
     cur = await conn.execute(
         "SELECT 1 FROM tribulation_sessions WHERE user_id=? AND target_realm=?",
-        (user_id, HUASHEN_REALM))
+        (user_id, target_realm))
     active_tribulation = await cur.fetchone()
     await cur.close()
     if active_tribulation:
         return None
-    if await character_service.item_qty_conn(conn, user_id, HUASHEN_AID_ITEM) > 0:
+    if await character_service.item_qty_conn(conn, user_id, item_key) > 0:
         return None
     await conn.execute(
         "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,1,1) "
         "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + 1",
-        (user_id, HUASHEN_AID_ITEM))
+        (user_id, item_key))
     return {
-        "item": HUASHEN_AID_ITEM,
+        "item": item_key,
         "qty": 1,
         "bound": 1,
-        "reason": "yuanying_full_aid",
+        "reason": reason,
     }
+
+
+async def _maybe_grant_huashen_aid_conn(conn, user_id: int, char) -> dict | None:
+    return await _maybe_grant_aid_conn(
+        conn, user_id, char, YUANYING_REALM, HUASHEN_REALM,
+        HUASHEN_AID_ITEM, "yuanying_full_aid")
+
+
+async def _maybe_grant_lianxu_aid_conn(conn, user_id: int, char) -> dict | None:
+    return await _maybe_grant_aid_conn(
+        conn, user_id, char, HUASHEN_REALM, LIANXU_REALM,
+        LIANXU_AID_ITEM, "huashen_full_aid")
 
 
 async def checkin(user_id: int, now: int = None) -> dict:
@@ -71,6 +87,7 @@ async def checkin(user_id: int, now: int = None) -> dict:
         stamina = await character_service.grant_stamina_conn(
             conn, user_id, DAILY_STAMINA_REWARD, now)
         aid = await _maybe_grant_huashen_aid_conn(conn, user_id, char)
+        lianxu_aid = await _maybe_grant_lianxu_aid_conn(conn, user_id, char)
         await game_events.emit_conn(
             conn, user_id, "daily.checkin", {"streak": streak, "amount": 1}, now)
         return {
@@ -78,5 +95,5 @@ async def checkin(user_id: int, now: int = None) -> dict:
             "streak": streak,
             "stone": reward,
             "stamina": stamina,
-            "extra_items": [aid] if aid else [],
+            "extra_items": [item for item in (aid, lianxu_aid) if item],
         }
