@@ -25,10 +25,13 @@ from config.bosses import WORLD_BOSSES
 from config.dungeons import DUNGEONS
 from config.items import ITEMS
 from config.maps import MAPS
+from config.quests import QUESTS
+from config.sects import TASK_STAMINA_REWARD
 from config.shop import SHOP_ITEMS
 from config.skills import SKILLS
 from config.weekly_events import (RUN_DAOHANG_REWARD, RUN_STAMINA_COST, WEEKLY_DAOHANG_CAP)
 from services.combat import Combatant, simulate
+from services.daily import DAILY_STAMINA_REWARD
 
 # 标准调参档:"满配无词条"——某境界玩家*应当*能通关内容的地板线。
 GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
@@ -299,23 +302,49 @@ def lianxu_progression_days(root_bone: int, seclusion_hours_per_day: float,
     return {"total_days": total, "stages": stages}
 
 
+def lianxu_stamina_supply_profile() -> dict:
+    """炼虚日精力供给：一天一管、早晚两管、完全利用自然恢复三档。"""
+    quest_reward = sum(
+        int(QUESTS[key]["reward"].get("stamina", 0))
+        for key in ("daily_explore", "daily_craft", "daily_pvp_win")
+    )
+    daily_reward = DAILY_STAMINA_REWARD + quest_reward + TASK_STAMINA_REWARD
+    cap = R.STAMINA_CAP[5]
+    natural = round(24 * 3600 / R.STAMINA_REGEN_SECONDS[5])
+    return {
+        "daily_reward": daily_reward,
+        "one_session": cap + daily_reward,
+        "two_sessions": cap * 2 + daily_reward,
+        "maximum": natural + daily_reward,
+    }
+
+
 def lianxu_progression_profile() -> dict:
-    """spec-v3 T0.11 推进时长：普通活跃 6~9 周，高活跃不低于 4 周。"""
+    """新精力曲线推进时长：普通 4~5 周，高活跃 2~3 周，满勤不低于 2 周。"""
+    supply = lianxu_stamina_supply_profile()
     ordinary = lianxu_progression_days(
         root_bone=60,
         seclusion_hours_per_day=18,
-        daily_stamina=160,
+        daily_stamina=supply["one_session"],
         stage_maps=("太初雾泽", "太初雾泽", "太初雾泽"),
         n=120,
     )
     high = lianxu_progression_days(
         root_bone=70,
         seclusion_hours_per_day=22,
-        daily_stamina=280,
+        daily_stamina=supply["two_sessions"],
         stage_maps=("太初雾泽", "虚空裂海", "混沌古狱"),
         n=120,
     )
-    return {"ordinary": ordinary, "high": high}
+    maximum = lianxu_progression_days(
+        root_bone=70,
+        seclusion_hours_per_day=22,
+        daily_stamina=supply["maximum"],
+        stage_maps=("太初雾泽", "虚空裂海", "混沌古狱"),
+        n=120,
+    )
+    return {"ordinary": ordinary, "high": high, "maximum": maximum,
+            "stamina_supply": supply}
 
 
 def _drop_weight(drops, key: str) -> float:
@@ -772,8 +801,13 @@ def report() -> None:
     prog = lianxu_progression_profile()
     ordinary = prog["ordinary"]["total_days"]
     high = prog["high"]["total_days"]
+    maximum = prog["maximum"]["total_days"]
+    supply = prog["stamina_supply"]
     print(f"  推进时长 普通活跃≈{ordinary:4.1f}天({ordinary/7:4.1f}周)"
-          f" 高活跃≈{high:4.1f}天({high/7:4.1f}周)")
+          f" 高活跃≈{high:4.1f}天({high/7:4.1f}周)"
+          f" 理论满勤≈{maximum:4.1f}天({maximum/7:4.1f}周)")
+    print(f"  日精力供给 一管+日活{supply['one_session']}"
+          f" 两管+日活{supply['two_sessions']} 理论满恢复+日活{supply['maximum']}")
     first = lianxu_first_breakthrough_profile()
     print(f"  首破周期 首丹≈{first['first_pill_days']:4.1f}天"
           f" 期望消耗{first['expected_attempts']:4.2f}枚 入炼虚≈{first['entry_days']:4.1f}天"
