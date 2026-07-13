@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
+from config import auction as auction_cfg
 from config import natal as NATAL
 from handlers import skills as skills_handler
 from handlers.common import action_callback_data
@@ -96,13 +97,80 @@ async def _取令牌(callback_data: str) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_skills_法宝列表只保留换装与单件操作入口(temp_db):
+    uid = 9300
+    await character.create(uid, f"菜单道友{uid}")
+    equipped_id = await _造法宝(uid, "玄铁剑")
+    spare_id = await _造法宝(uid, "陨星剑")
+    await character.equip_instance(uid, equipped_id)
+
+    _text, markup = await skills_handler.render_skills_category(uid, "equipment")
+    datas = _datas(markup)
+    token_actions = {
+        row["action"]
+        for data in datas
+        if (row := await _取令牌(data))
+    }
+
+    assert {f"skills:item:{equipped_id}", f"skills:item:{spare_id}"} <= set(datas)
+    assert token_actions == {f"eq:unequip:{equipped_id}", f"equip:{spare_id}"}
+
+
+@pytest.mark.asyncio
+async def test_skills_单件法宝页承载养成操作(temp_db):
+    uid = 9302
+    await _备好元婴道友(uid)
+    inst_id = await _造法宝(uid, "天魔刃")
+
+    _text, markup = await skills_handler.render_equipment_item(uid, inst_id)
+    datas = _datas(markup)
+    actions = {
+        row["action"]
+        for data in datas
+        if (row := await _取令牌(data))
+    }
+
+    assert "skills:cat:equipment" in datas
+    assert actions == {
+        f"eq:enhance:{inst_id}",
+        f"eq:reforge:{inst_id}",
+        f"eq:decompose:{inst_id}",
+        f"natal:bind:{inst_id}",
+    }
+
+
+@pytest.mark.asyncio
+async def test_skills_不存在的单件法宝页只返回列表(temp_db):
+    uid = 9303
+    await character.create(uid, f"寻宝道友{uid}")
+
+    _text, markup = await skills_handler.render_equipment_item(uid, 999999)
+
+    assert _datas(markup) == ["skills:cat:equipment"]
+
+
+@pytest.mark.asyncio
+async def test_skills_拍卖托管法宝操作页不提供状态变更(temp_db):
+    uid = 9306
+    await character.create(uid, f"寄拍道友{uid}")
+    inst_id = await _造法宝(uid, "玄铁剑")
+    await db.execute(
+        "UPDATE item_instances SET status=? WHERE id=?",
+        (auction_cfg.INSTANCE_STATUS_AUCTION, inst_id))
+
+    _text, markup = await skills_handler.render_equipment_item(uid, inst_id)
+
+    assert _datas(markup) == ["skills:cat:equipment"]
+
+
+@pytest.mark.asyncio
 async def test_skills_本命法宝认主喂养斩缚走一次性令牌(temp_db):
     uid = 9301
     await _备好元婴道友(uid)
     inst_id = await _造法宝(uid, "天魔刃")
     await _给材料(uid, NATAL.bind_cost("宝"))
 
-    text, markup = await skills_handler.render_skills_category(uid, "equipment")
+    text, markup = await skills_handler.render_equipment_item(uid, inst_id)
     buttons = _buttons(markup)
     bind_data = next(data for data in _datas(markup)
                      if data.startswith(f"natal:bind:{inst_id}:"))
@@ -134,7 +202,7 @@ async def test_skills_本命法宝认主喂养斩缚走一次性令牌(temp_db):
     assert again.answers and again.answers[0][1] is True
     assert not again.message.edits
 
-    text, markup = await skills_handler.render_skills_category(uid, "equipment")
+    text, markup = await skills_handler.render_equipment_item(uid, inst_id)
     datas = _datas(markup)
     feed_data = next(data for data in datas if data.startswith(f"natal:feed:{inst_id}:"))
     unbind_data = next(data for data in datas if data.startswith(f"natal:unbind:{inst_id}:"))
@@ -166,7 +234,7 @@ async def test_skills_本命法宝认主喂养斩缚走一次性令牌(temp_db):
     assert "喂养" in fed.message.edits[-1][0]
     assert "Lv.2" in fed.message.edits[-1][0]
 
-    _text, markup = await skills_handler.render_skills_category(uid, "equipment")
+    _text, markup = await skills_handler.render_equipment_item(uid, inst_id)
     unbind_data = next(data for data in _datas(markup)
                        if data.startswith(f"natal:unbind:{inst_id}:"))
     await character.add_stone(uid, NATAL.unbind_cost(2))
@@ -182,9 +250,11 @@ async def test_skills_本命法宝认主喂养斩缚走一次性令牌(temp_db):
     assert "斩" in unbound.message.edits[-1][0]
     assert "本命" in unbound.message.edits[-1][0]
 
-    text, markup = await skills_handler.render_skills_category(uid, "equipment")
+    text, markup = await skills_handler.render_equipment_item(uid, inst_id)
     datas = _datas(markup)
 
     assert "已斩缚绑定" in text
     assert not any(data.startswith(f"natal:bind:{inst_id}:") for data in datas)
-    assert any(data.startswith(f"natal:bind:{other_inst_id}:") for data in datas)
+    _text, other_markup = await skills_handler.render_equipment_item(uid, other_inst_id)
+    assert any(data.startswith(f"natal:bind:{other_inst_id}:")
+               for data in _datas(other_markup))
