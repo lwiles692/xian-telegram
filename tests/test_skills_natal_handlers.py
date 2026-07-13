@@ -164,6 +164,62 @@ async def test_skills_拍卖托管法宝操作页不提供状态变更(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_skills_单件法宝回调打开操作页(temp_db):
+    uid = 9304
+    await character.create(uid, f"炼器道友{uid}")
+    inst_id = await _造法宝(uid, "玄铁剑")
+    callback = _Callback(uid, f"skills:item:{inst_id}")
+
+    await skills_handler.cb_skills_item(callback)
+
+    assert callback.message.edits
+    assert "skills:cat:equipment" in _datas(callback.message.edits[-1][1])
+    assert callback.answers == [(None, False)]
+
+
+@pytest.mark.asyncio
+async def test_skills_养成结果返回当前法宝且分解结果返回列表(temp_db):
+    uid = 9305
+    await character.create(uid, f"百炼道友{uid}")
+    enhance_id = await _造法宝(uid, "玄铁剑")
+    enhance_data = await action_callback_data(uid, f"eq:enhance:{enhance_id}")
+    enhanced = _Callback(uid, enhance_data)
+
+    await skills_handler.cb_enhance(enhanced)
+
+    assert f"skills:item:{enhance_id}" in _datas(enhanced.message.edits[-1][1])
+    assert "skills:cat:equipment" in _datas(enhanced.message.edits[-1][1])
+
+    decompose_id = await _造法宝(uid, "陨星剑")
+    decompose_data = await action_callback_data(uid, f"eq:decompose:{decompose_id}")
+    decomposed = _Callback(uid, decompose_data)
+
+    await skills_handler.cb_decompose(decomposed)
+
+    assert _datas(decomposed.message.edits[-1][1]) == ["skills:cat:equipment"]
+
+
+@pytest.mark.asyncio
+async def test_skills_装备与卸下结果均返回法宝列表(temp_db):
+    uid = 9307
+    await character.create(uid, f"换装道友{uid}")
+    inst_id = await _造法宝(uid, "玄铁剑")
+    equip_data = await action_callback_data(uid, f"equip:{inst_id}")
+    equipped = _Callback(uid, equip_data)
+
+    await skills_handler.cb_equip(equipped)
+
+    assert _datas(equipped.message.edits[-1][1]) == ["skills:cat:equipment"]
+
+    unequip_data = await action_callback_data(uid, f"eq:unequip:{inst_id}")
+    unequipped = _Callback(uid, unequip_data)
+
+    await skills_handler.cb_unequip(unequipped)
+
+    assert _datas(unequipped.message.edits[-1][1]) == ["skills:cat:equipment"]
+
+
+@pytest.mark.asyncio
 async def test_skills_本命法宝认主喂养斩缚走一次性令牌(temp_db):
     uid = 9301
     await _备好元婴道友(uid)
@@ -195,6 +251,8 @@ async def test_skills_本命法宝认主喂养斩缚走一次性令牌(temp_db):
     assert dict(inst) == {"bound": 1, "natal_level": 1}
     assert "本命" in bound.message.edits[-1][0]
     assert "Lv.1" in bound.message.edits[-1][0]
+    assert _datas(bound.message.edits[-1][1]) == [
+        f"skills:item:{inst_id}", "skills:cat:equipment"]
 
     again = _Callback(uid, bind_data)
     await skills_handler.cb_natal_action(again)

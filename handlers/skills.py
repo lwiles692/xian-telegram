@@ -46,7 +46,7 @@ def _learnable_pages(inv: list[tuple[str, int]]) -> list[tuple[str, int, dict]]:
     return pages
 
 
-def _equipment_mark(inst: dict, natal_id: int) -> str:
+def _equipment_mark(inst: dict) -> str:
     if inst.get("status") == auction_cfg.INSTANCE_STATUS_AUCTION:
         return "拍卖托管"
     if int(inst.get("natal_level") or 0) > 0:
@@ -60,6 +60,16 @@ def _equipment_list_button() -> InlineKeyboardButton:
     return InlineKeyboardButton(
         text="↩️ 返回法宝列表",
         callback_data="skills:cat:equipment")
+
+
+def _equipment_back_markup(instance_id: int | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    if instance_id is not None:
+        rows.append([InlineKeyboardButton(
+            text=f"↩️ 返回法宝 #{instance_id}",
+            callback_data=f"skills:item:{instance_id}")])
+    rows.append([_equipment_list_button()])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def render_skills(user_id: int):
@@ -101,13 +111,12 @@ async def render_equipment_item(user_id: int, instance_id: int):
     instances = await character.item_instances(user_id)
     inst = next((item for item in instances if int(item["id"]) == instance_id), None)
     if not inst:
-        markup = InlineKeyboardMarkup(inline_keyboard=[[_equipment_list_button()]])
-        return "未寻得此法宝。", markup
+        return "未寻得此法宝。", _equipment_back_markup()
 
     inv = await character.inventory(user_id)
     qihun = dict(inv).get(QIHUN_KEY, 0)
     natal_id = int(char.natal_instance_id or 0)
-    mark = _equipment_mark(inst, natal_id)
+    mark = _equipment_mark(inst)
     lvl = inst.get("enhance_level", 0)
     lvl_txt = f"+{lvl} " if lvl else ""
     lines = [
@@ -176,10 +185,9 @@ async def render_skills_category(user_id: int, cat: str):
         qihun = 0
     if cat == "equipment" and instances:
         lines.append(f"器魂 ×{qihun}，可用于强化/重铸。")
-        natal_id = int(char.natal_instance_id or 0)
         for inst in instances:
             locked = inst.get("status") == auction_cfg.INSTANCE_STATUS_AUCTION
-            mark = _equipment_mark(inst, natal_id)
+            mark = _equipment_mark(inst)
             lvl = inst.get("enhance_level", 0)
             lvl_txt = f"+{lvl} " if lvl else ""
             lines.append(
@@ -253,6 +261,19 @@ async def cb_skills_category(callback: CallbackQuery):
         return
     cat = callback.data.split(":", 2)[2]
     text, markup = await render_skills_category(callback.from_user.id, cat)
+    await show(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("skills:item:"))
+async def cb_skills_item(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    try:
+        instance_id = int(callback.data.rsplit(":", 1)[1])
+    except (AttributeError, ValueError):
+        instance_id = 0
+    text, markup = await render_equipment_item(callback.from_user.id, instance_id)
     await show(callback, text, markup)
     await callback.answer()
 
@@ -333,8 +354,12 @@ async def _eq_op(callback: CallbackQuery, prefix: str, fn):
     action = await consume_action_callback(callback)
     if not action or not action.startswith(prefix):
         return
-    res = await fn(callback.from_user.id, int(action.rsplit(":", 1)[1]))
-    await show(callback, _eq_text(res), section_back_markup("↩️ 返回功法", "nav:skills"))
+    instance_id = int(action.rsplit(":", 1)[1])
+    res = await fn(callback.from_user.id, instance_id)
+    list_only = prefix == "eq:unequip:" or (
+        prefix == "eq:decompose:" and res["status"] == "ok")
+    markup = _equipment_back_markup(None if list_only else instance_id)
+    await show(callback, _eq_text(res), markup)
     await callback.answer()
 
 
@@ -347,6 +372,7 @@ async def cb_natal_action(callback: CallbackQuery):
         return
     parts = action.split(":")
     op = parts[1] if len(parts) > 1 else ""
+    instance_id = None
     try:
         instance_id = int(parts[2]) if len(parts) == 3 else None
         if op == "bind" and instance_id is not None:
@@ -360,7 +386,7 @@ async def cb_natal_action(callback: CallbackQuery):
     except ValueError:
         res = {"status": "bad_request"}
     res = {**res, "action": op}
-    await show(callback, _natal_text(res), section_back_markup("↩️ 返回法宝", "skills:cat:equipment"))
+    await show(callback, _natal_text(res), _equipment_back_markup(instance_id))
     await callback.answer()
 
 
@@ -392,7 +418,7 @@ async def cb_equip(callback: CallbackQuery):
     if not action or not action.startswith("equip:"):
         return
     res = await character.equip_instance(callback.from_user.id, int(action[6:]))
-    await show(callback, _result_text(res), section_back_markup("↩️ 返回功法", "nav:skills"))
+    await show(callback, _result_text(res), _equipment_back_markup())
     await callback.answer()
 
 

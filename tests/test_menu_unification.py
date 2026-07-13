@@ -144,7 +144,12 @@ async def test_dense_feature_home_pages_link_to_categories_before_actions(temp_d
     assert {"skills:cat:equipment", "skills:cat:pages"} <= set(skills_home_datas)
     assert not any(data.startswith(("equip:", "eq:", "learn:")) for data in skills_home_datas)
     _text, skills_equipment = await skills_handler.render_skills_category(uid, "equipment")
-    assert any(data.startswith("eq:enhance:") for data in _datas(skills_equipment))
+    skills_equipment_datas = _datas(skills_equipment)
+    assert any(data.startswith("skills:item:") for data in skills_equipment_datas)
+    assert not any(data.startswith("eq:enhance:") for data in skills_equipment_datas)
+    instance_id = int((await character.item_instances(uid))[0]["id"])
+    _text, skills_item = await skills_handler.render_equipment_item(uid, instance_id)
+    assert any(data.startswith("eq:enhance:") for data in _datas(skills_item))
 
 
 def test_action_result_markup_returns_to_section_or_main_menu():
