@@ -57,6 +57,18 @@ SQLite auto-created at `data/xian.db` (gitignored). No CI, no Dockerfile, no Mak
 - Private-only gate: `await guard_private_message(message)` / `guard_private_callback(callback)`; returns True if rejected.
 - Service calls return `dict` with `"status"` key; handler maps status → Chinese text (see `handlers/cultivate.py:_bt_text`).
 
+## 消息展示与文案规范
+
+- 消息按信息密度分层：一句话成功、失败、资源不足、冷却和令牌提示使用 `str`；角色面板、商店、悬赏等交互页面使用 aiogram `Text` 实体；帮助、版本公告、历练/秘境/PvP 结算等长报告使用 `RichPage`。
+- 统一通过 `bot.presentation.answer()`、`show()`、`send()` 发送、编辑或主动播报。`RichPage` 必须同时提供 Rich HTML 与语义一致的 `Text` 回退；不要在 handler 中直接拼发送参数，也不要为两种格式重复查询业务数据。
+- 普通实体消息禁止依赖全局 `parse_mode`，发送参数必须显式保持 `parse_mode=None`。Rich 页面只使用 Rich HTML，不使用 Markdown/MarkdownV2。
+- Rich HTML 中所有玩家名、宗门名、物品名、战斗日志和其他外部或动态文本必须经过 `escape_rich_html()`；静态标签集中在展示构造器中生成，禁止手写未转义的动态 HTML。
+- 长文首行使用粗体标题，核心状态紧跟标题；用真正的小节标题和空行表达层级，禁止用 `—— 标题 ——` 一类字符横线充当分隔线。列表每行只表达一个对象，编号、物品名或角色名作为视觉锚点。
+- 规则说明使用斜体或引用，操作提示放在末尾；已有按钮能表达的动作不再重复成长句。每个小节最多使用一个功能性 emoji，保持修仙口吻但避免满屏装饰。
+- 战报的胜负、奖励、当前气血法力和剩余精力必须保持在折叠区外；逐回合日志放入 Rich HTML 的 `<details>`，实体回退使用 `ExpandableBlockQuote`。日志为空时显示“斗法无可记述。”。PvP 战报必须明确“本场不消耗气血、法力与精力”。
+- `RICH_MESSAGES_ENABLED` 默认开启，仅 `1`、`true`、`yes`、`on`（忽略大小写）视为开启；关闭时直接发送实体回退。Rich 解析失败或明确不支持 Rich 的 Telegram 错误才允许降级，`message is not modified` 静默处理，未知、限流和网络异常继续抛出。
+- Rich 与普通消息切换时，按钮文字、callback 数据和一次性令牌行为必须保持不变；状态变更按钮仍遵守 `action_callback_data()` / `consume_action_callback()` 规则。
+
 ## Service Conventions (see services/AGENTS.md)
 - Async functions; private helpers prefixed `_`.
 - **Lazy regen**: stamina/hp/mp recovered by timestamp delta on read, then persisted. Never precompute on timer.
