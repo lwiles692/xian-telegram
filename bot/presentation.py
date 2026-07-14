@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import html
+import inspect
 import logging
 import os
 from typing import Union
@@ -87,6 +88,14 @@ def _rich_input(page: RichPage) -> InputRichMessage:
     return InputRichMessage(html=page.rich_html)
 
 
+def _supports_rich_edit(message) -> bool:
+    try:
+        parameters = inspect.signature(message.edit_text).parameters
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return "rich_message" in parameters
+
+
 async def answer(message, content: MessageContent, markup=None):
     if (isinstance(content, RichPage) and rich_messages_enabled()
             and callable(getattr(message, "answer_rich", None))):
@@ -128,7 +137,7 @@ async def show(callback, content: MessageContent, markup=None):
     current: str | Text = (content.fallback
                             if isinstance(content, RichPage) else content)
     if (isinstance(content, RichPage) and rich_messages_enabled()
-            and callable(getattr(callback.message, "answer_rich", None))):
+            and _supports_rich_edit(callback.message)):
         try:
             return await callback.message.edit_text(
                 rich_message=_rich_input(content), reply_markup=markup)

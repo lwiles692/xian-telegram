@@ -38,6 +38,22 @@ class FakeMessage:
             raise self.rich_error
 
 
+class RichEditMessage(FakeMessage):
+    async def edit_text(self, rich_message=None, **kwargs):
+        if rich_message is not None:
+            kwargs["rich_message"] = rich_message
+        self.edits.append(kwargs)
+        if self.edit_errors:
+            raise self.edit_errors.pop(0)
+
+
+class RegularEditMessage(FakeMessage):
+    async def edit_text(self, text, reply_markup=None, **kwargs):
+        self.edits.append({"text": text, "reply_markup": reply_markup, **kwargs})
+        if self.edit_errors:
+            raise self.edit_errors.pop(0)
+
+
 class FakeCallback:
     def __init__(self, message):
         self.message = message
@@ -122,7 +138,7 @@ async def test_answer_and_send_fall_back_after_rich_format_error(monkeypatch, ca
 async def test_show_falls_back_only_for_rich_format_errors(monkeypatch, caplog):
     page = RichPage("battle", "<h1>战报</h1>", Text(Bold("战报")))
     rich_error = _bad_request("Bad Request: can't parse rich message; 密文<&>")
-    message = FakeMessage(edit_errors=[rich_error])
+    message = RichEditMessage(edit_errors=[rich_error])
     monkeypatch.setenv("RICH_MESSAGES_ENABLED", "true")
 
     await show(FakeCallback(message), page)
@@ -134,6 +150,30 @@ async def test_show_falls_back_only_for_rich_format_errors(monkeypatch, caplog):
     assert "解析失败" in caplog.text
     assert "密文" not in caplog.text
     assert "<h1>战报</h1>" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_show_uses_rich_when_edit_text_declares_rich_message(monkeypatch):
+    page = RichPage("declared", "<h1>战报</h1>", Text(Bold("战报")))
+    message = RichEditMessage()
+    monkeypatch.setenv("RICH_MESSAGES_ENABLED", "true")
+
+    await show(FakeCallback(message), page)
+
+    assert "rich_message" in message.edits[0]
+    assert "text" not in message.edits[0]
+
+
+@pytest.mark.asyncio
+async def test_show_uses_regular_when_edit_text_lacks_rich_message(monkeypatch):
+    page = RichPage("undeclared", "<h1>战报</h1>", Text(Bold("战报")))
+    message = RegularEditMessage()
+    monkeypatch.setenv("RICH_MESSAGES_ENABLED", "true")
+
+    await show(FakeCallback(message), page)
+
+    assert message.edits[0]["text"] == "战报"
+    assert message.edits[0]["parse_mode"] is None
 
 
 @pytest.mark.asyncio
