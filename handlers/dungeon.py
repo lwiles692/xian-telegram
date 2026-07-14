@@ -8,7 +8,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from config.dungeons import DUNGEONS
 from config.items import item_name
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
-                             battle_vitals_lines, consume_action_callback,
+                             battle_report_page, battle_vitals_lines,
+                             consume_action_callback,
                              guard_private_callback, guard_private_message,
                              section_back_markup, show, vitals_line)
 from services import character, dungeon
@@ -61,7 +62,7 @@ def _minutes(seconds: int) -> str:
     return f"{minutes} 分钟"
 
 
-def _result_text(res: dict) -> str:
+def _result_text(res: dict):
     s = res["status"]
     if s == "started":
         fee = res.get("entry_fee", 0)
@@ -93,23 +94,31 @@ def _result_text(res: dict) -> str:
     if s == "bad_dungeon":
         return "查无此秘境。"
     rw = res["reward"]
-    parts = [f"🪙{rw['stone']}", f"修为+{rw['cult']}"]
+    reward_lines = [f"🪙 {rw['stone']}", f"修为 +{rw['cult']}"]
     if rw.get("daohang"):
-        parts.append(f"道行+{rw['daohang']}")
+        reward_lines.append(f"道行 +{rw['daohang']}")
     if rw["drops"]:
-        parts.append("、".join(f"{item_name(k)}×{v}" for k, v in rw["drops"].items()))
+        reward_lines.append("、".join(
+            f"{item_name(k)}×{v}" for k, v in rw["drops"].items()))
     if rw["equipment"]:
-        parts.append("法宝：" + "、".join(rw["equipment"]))
-    body = [f"🏯 {res['dungeon']}：深入 {res['cleared']}/{res['layers']} 层。", *res["log"]]
+        reward_lines.append("法宝：" + "、".join(rw["equipment"]))
+    log = res["log"]
     if res["cleared"]:
-        body.append("🎁 收获：" + "，".join(parts))
+        outcome = "秘境探索有所收获。"
     elif res.get("defeat_reason") == "round_limit":
-        body.append(f"首层久战 {round_limit_label()}未决，按剩余气血比例判负，重伤而归（修为、装备无损）。")
+        outcome = f"首层久战 {round_limit_label()}未决，按剩余气血比例判负，重伤而归（修为、装备无损）。"
+        reward_lines = []
     else:
-        body.append("首层即力竭，重伤而归（修为、装备无损）。")
-    body += battle_vitals_lines(res)
-    body.append(f"⚡ 精力余 {res['stamina_left']}")
-    return "\n".join(body)
+        outcome = "首层即力竭，重伤而归（修为、装备无损）。"
+        reward_lines = []
+    return battle_report_page(
+        page="dungeon_result",
+        title=f"🏯 {res['dungeon']}·深入 {res['cleared']}/{res['layers']} 层",
+        outcome=outcome,
+        log=log,
+        rewards=reward_lines if res["cleared"] else [],
+        status=battle_vitals_lines(res) + [f"⚡ 精力余 {res['stamina_left']}"],
+    )
 
 
 @router.message(Command("dungeon"))

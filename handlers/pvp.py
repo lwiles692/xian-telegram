@@ -5,7 +5,9 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from handlers.common import action_callback_data, consume_action_callback, NEED_START, is_private_chat, show
+from handlers.common import (NEED_START, action_callback_data,
+                             battle_report_page, consume_action_callback,
+                             is_private_chat, show)
 from services import pvp, world_boss
 
 router = Router()
@@ -26,7 +28,7 @@ def _outcome_text(res: dict) -> str:
     return "技高一筹" if res["win"] else "惜败半招"
 
 
-def _text(res: dict, opponent_name: str = "对手") -> str:
+def _text(res: dict, opponent_name: str = "对手"):
     s = res["status"]
     if s == "ok":
         attacker = res.get("attacker_name", "道友")
@@ -35,12 +37,17 @@ def _text(res: dict, opponent_name: str = "对手") -> str:
         rep_txt = (f"声望 +{res['reputation_gain']}" if res.get("reputation_counted", True)
                    else "声望 +0（今日已与此对手切磋）")
         tier_txt = f"（{res['tier']}）" if res.get("tier") else ""
-        return "\n".join([
-            f"⚔️ 切磋：{attacker} vs {defender}",
-            *shown,
-            f"{_outcome_text(res)}，天梯积分 {res['rating_delta']:+d}{tier_txt}，"
-            f"{rep_txt}。周榜奖池按声望排名结算。",
-        ])
+        return battle_report_page(
+            page="pvp_result",
+            title=f"⚔️ 切磋：{attacker} vs {defender}",
+            outcome=_outcome_text(res),
+            log=shown,
+            rewards=[],
+            status=[
+                f"天梯积分 {res['rating_delta']:+d}{tier_txt}",
+                f"{rep_txt}。周榜奖池按声望排名结算。",
+            ],
+        )
     if s == "no_opponent":
         return "暂未寻得合适对手。可让另一位道友先 /start。"
     if s == "daily_limit":
