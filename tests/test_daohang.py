@@ -158,7 +158,8 @@ async def test_collect_seclusion_huashen_grace_accumulates_condensation_progress
     assert asc["overflow_remainder"] == gained
 
     from handlers import me as me_handler
-    text, _ = await me_handler.render_me(uid)
+    content, _ = await me_handler.render_me(uid)
+    text = plain_text(content)
     assert res["overflow"]["label"] in text
 
 

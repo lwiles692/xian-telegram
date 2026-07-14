@@ -1,6 +1,7 @@
 import pytest
 import pytest_asyncio
 
+from bot.presentation import plain_text
 from models import db
 from services import character, explore, game_events, quests, social, world_boss
 
@@ -106,7 +107,8 @@ async def test_achievements_are_visible_on_me_panel(temp_db):
             conn, uid, "explore.boss_win",
             {"mob": "千年青牛", "amount": 1}, now=1000)
 
-    text, _ = await me_handler.render_me(uid)
+    content, _ = await me_handler.render_me(uid)
+    text = plain_text(content)
 
     assert "🏅 成就：初斩妖王" in text
 
@@ -123,7 +125,8 @@ async def test_me_panel_uses_equipped_weapon_instance(temp_db):
     assert (await character.equip_instance(uid, inst["id"]))["status"] == "ok"
     assert (await character.get(uid)).weapon_key == "新手剑"
 
-    text, _ = await me_handler.render_me(uid)
+    content, _ = await me_handler.render_me(uid)
+    text = plain_text(content)
 
     assert "⚔️ 法宝：玄铁剑" in text
     assert "⚔️ 法宝：新手木剑" not in text
@@ -141,7 +144,8 @@ async def test_me_panel_uses_same_weapon_predicate_as_stats(temp_db):
         "UPDATE item_instances SET equipped_slot='armor' WHERE id=?",
         (inst["id"],))
 
-    text, _ = await me_handler.render_me(uid)
+    content, _ = await me_handler.render_me(uid)
+    text = plain_text(content)
 
     assert "⚔️ 法宝：玄铁剑" in text
     assert "⚔️ 法宝：新手木剑" not in text

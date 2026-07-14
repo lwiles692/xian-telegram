@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
+from aiogram.utils.formatting import Text
 
 from bot.app import _COMMANDS
 from bot.presentation import RichPage, plain_text
 from config.copy import HELP_GROUPS
 from handlers import help as help_handler
+from handlers import me as me_handler
 from models import db
+from services import character
 
 
 @pytest_asyncio.fixture
@@ -47,3 +50,20 @@ async def test_version_notice_keeps_same_dynamic_notice_in_both_formats(temp_db,
 
     assert notice in plain_text(page)
     assert "宽限&lt;&amp;&gt;_#[]()" in page.rich_html
+
+
+@pytest.mark.asyncio
+async def test_me_panel_uses_bold_sections_without_losing_dynamic_values(temp_db):
+    uid = 98101
+    await character.create(uid, "面板<&>_#[]()")
+    await character.add_stone(uid, 4321)
+
+    content, markup = await me_handler.render_me(uid)
+    text = plain_text(content)
+    entity_types = [entity.type for entity in content.as_kwargs()["entities"]]
+    expected_stone = (await character.get(uid)).spirit_stone
+
+    assert isinstance(content, Text)
+    assert str(expected_stone) in text
+    assert entity_types.count("bold") >= 4
+    assert markup is not None
