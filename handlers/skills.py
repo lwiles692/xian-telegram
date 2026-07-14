@@ -46,6 +46,32 @@ def _learnable_pages(inv: list[tuple[str, int]]) -> list[tuple[str, int, dict]]:
     return pages
 
 
+def _equipment_mark(inst: dict) -> str:
+    if inst.get("status") == auction_cfg.INSTANCE_STATUS_AUCTION:
+        return "拍卖托管"
+    if int(inst.get("natal_level") or 0) > 0:
+        return f"本命Lv.{inst['natal_level']}"
+    if int(inst.get("bound") or 0):
+        return "已斩缚绑定"
+    return "已装备" if inst["equipped_slot"] else "未装备"
+
+
+def _equipment_list_button() -> InlineKeyboardButton:
+    return InlineKeyboardButton(
+        text="↩️ 返回法宝列表",
+        callback_data="skills:cat:equipment")
+
+
+def _equipment_back_markup(instance_id: int | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    if instance_id is not None:
+        rows.append([InlineKeyboardButton(
+            text=f"↩️ 返回法宝 #{instance_id}",
+            callback_data=f"skills:item:{instance_id}")])
+    rows.append([_equipment_list_button()])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 async def render_skills(user_id: int):
     char = await character.get(user_id)
     if not char:
@@ -78,6 +104,71 @@ async def render_skills(user_id: int):
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+async def render_equipment_item(user_id: int, instance_id: int):
+    char = await character.get(user_id)
+    if not char:
+        return NEED_START, None
+    instances = await character.item_instances(user_id)
+    inst = next((item for item in instances if int(item["id"]) == instance_id), None)
+    if not inst:
+        return "未寻得此法宝。", _equipment_back_markup()
+
+    inv = await character.inventory(user_id)
+    qihun = dict(inv).get(QIHUN_KEY, 0)
+    natal_id = int(char.natal_instance_id or 0)
+    mark = _equipment_mark(inst)
+    lvl = inst.get("enhance_level", 0)
+    lvl_txt = f"+{lvl} " if lvl else ""
+    lines = [
+        "📖 法宝详情",
+        f"#{inst['id']} {lvl_txt}{item_name(inst['base_key'])}",
+        f"状态：{mark}",
+        f"属性：{_bonus_text(inst)}",
+        f"器魂 ×{qihun}",
+    ]
+    rows = []
+    locked = inst.get("status") == auction_cfg.INSTANCE_STATUS_AUCTION
+    if equipment_slot(inst["base_key"]) and not locked:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"强化#{inst['id']}",
+                callback_data=await action_callback_data(
+                    user_id, f"eq:enhance:{inst['id']}")),
+            InlineKeyboardButton(
+                text=f"重铸#{inst['id']}",
+                callback_data=await action_callback_data(
+                    user_id, f"eq:reforge:{inst['id']}")),
+        ])
+        if not inst["equipped_slot"]:
+            rows.append([InlineKeyboardButton(
+                text=f"分解#{inst['id']}",
+                callback_data=await action_callback_data(
+                    user_id, f"eq:decompose:{inst['id']}"))])
+
+        natal_ops = []
+        if int(inst.get("natal_level") or 0) > 0 and int(inst["id"]) == natal_id:
+            if int(inst["natal_level"]) < NATAL.MAX_LEVEL:
+                natal_ops.append(InlineKeyboardButton(
+                    text=f"喂养#{inst['id']}",
+                    callback_data=await action_callback_data(
+                        user_id, f"natal:feed:{inst['id']}")))
+            natal_ops.append(InlineKeyboardButton(
+                text=f"斩缚#{inst['id']}",
+                callback_data=await action_callback_data(
+                    user_id, f"natal:unbind:{inst['id']}")))
+        elif not natal_id and inst["tier"] in NATAL.ELIGIBLE_TIERS:
+            if not int(inst.get("bound") or 0) and not int(inst.get("natal_level") or 0):
+                natal_ops.append(InlineKeyboardButton(
+                    text=f"认主#{inst['id']}",
+                    callback_data=await action_callback_data(
+                        user_id, f"natal:bind:{inst['id']}")))
+        if natal_ops:
+            rows.append(natal_ops)
+
+    rows.append([_equipment_list_button()])
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 async def render_skills_category(user_id: int, cat: str):
     char = await character.get(user_id)
     if not char:
@@ -94,62 +185,27 @@ async def render_skills_category(user_id: int, cat: str):
         qihun = 0
     if cat == "equipment" and instances:
         lines.append(f"器魂 ×{qihun}，可用于强化/重铸。")
-        natal_id = int(char.natal_instance_id or 0)
         for inst in instances:
             locked = inst.get("status") == auction_cfg.INSTANCE_STATUS_AUCTION
-            if locked:
-                mark = "拍卖托管"
-            elif int(inst.get("natal_level") or 0) > 0:
-                mark = f"本命Lv.{inst['natal_level']}"
-            elif int(inst.get("bound") or 0):
-                mark = "已斩缚绑定"
-            else:
-                mark = "已装备" if inst["equipped_slot"] else "未装备"
+            mark = _equipment_mark(inst)
             lvl = inst.get("enhance_level", 0)
             lvl_txt = f"+{lvl} " if lvl else ""
             lines.append(
                 f"#{inst['id']} {lvl_txt}{item_name(inst['base_key'])}（{mark}，{_bonus_text(inst)}）")
             if equipment_slot(inst["base_key"]) and not locked:
-                if not inst["equipped_slot"]:
-                    rows.append([InlineKeyboardButton(
-                        text=f"装备 {item_name(inst['base_key'])}",
-                        callback_data=await action_callback_data(user_id, f"equip:{inst['id']}"))])
-                ops = [
+                action = (
+                    await action_callback_data(user_id, f"eq:unequip:{inst['id']}")
+                    if inst["equipped_slot"]
+                    else await action_callback_data(user_id, f"equip:{inst['id']}")
+                )
+                rows.append([
                     InlineKeyboardButton(
-                        text=f"强化#{inst['id']}",
-                        callback_data=await action_callback_data(user_id, f"eq:enhance:{inst['id']}")),
+                        text=f"{'卸下' if inst['equipped_slot'] else '装备'} #{inst['id']}",
+                        callback_data=action),
                     InlineKeyboardButton(
-                        text=f"重铸#{inst['id']}",
-                        callback_data=await action_callback_data(user_id, f"eq:reforge:{inst['id']}")),
-                ]
-                if not inst["equipped_slot"]:
-                    ops.append(InlineKeyboardButton(
-                        text=f"分解#{inst['id']}",
-                        callback_data=await action_callback_data(user_id, f"eq:decompose:{inst['id']}")))
-                else:
-                    ops.append(InlineKeyboardButton(
-                        text=f"卸下#{inst['id']}",
-                        callback_data=await action_callback_data(user_id, f"eq:unequip:{inst['id']}")))
-                rows.append(ops)
-                natal_ops = []
-                if int(inst.get("natal_level") or 0) > 0 and int(inst["id"]) == natal_id:
-                    if int(inst["natal_level"]) < NATAL.MAX_LEVEL:
-                        natal_ops.append(InlineKeyboardButton(
-                            text=f"喂养#{inst['id']}",
-                            callback_data=await action_callback_data(
-                                user_id, f"natal:feed:{inst['id']}")))
-                    natal_ops.append(InlineKeyboardButton(
-                        text=f"斩缚#{inst['id']}",
-                        callback_data=await action_callback_data(
-                            user_id, f"natal:unbind:{inst['id']}")))
-                elif not natal_id and inst["tier"] in NATAL.ELIGIBLE_TIERS:
-                    if not int(inst.get("bound") or 0) and not int(inst.get("natal_level") or 0):
-                        natal_ops.append(InlineKeyboardButton(
-                            text=f"认主#{inst['id']}",
-                            callback_data=await action_callback_data(
-                                user_id, f"natal:bind:{inst['id']}")))
-                if natal_ops:
-                    rows.append(natal_ops)
+                        text=f"操作 #{inst['id']}",
+                        callback_data=f"skills:item:{inst['id']}"),
+                ])
     elif cat == "pages":
         page_buttons = []
         for key, qty, item in _learnable_pages(inv):
@@ -205,6 +261,19 @@ async def cb_skills_category(callback: CallbackQuery):
         return
     cat = callback.data.split(":", 2)[2]
     text, markup = await render_skills_category(callback.from_user.id, cat)
+    await show(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("skills:item:"))
+async def cb_skills_item(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    try:
+        instance_id = int(callback.data.rsplit(":", 1)[1])
+    except (AttributeError, ValueError):
+        instance_id = 0
+    text, markup = await render_equipment_item(callback.from_user.id, instance_id)
     await show(callback, text, markup)
     await callback.answer()
 
@@ -285,8 +354,12 @@ async def _eq_op(callback: CallbackQuery, prefix: str, fn):
     action = await consume_action_callback(callback)
     if not action or not action.startswith(prefix):
         return
-    res = await fn(callback.from_user.id, int(action.rsplit(":", 1)[1]))
-    await show(callback, _eq_text(res), section_back_markup("↩️ 返回功法", "nav:skills"))
+    instance_id = int(action.rsplit(":", 1)[1])
+    res = await fn(callback.from_user.id, instance_id)
+    list_only = prefix == "eq:unequip:" or (
+        prefix == "eq:decompose:" and res["status"] == "ok")
+    markup = _equipment_back_markup(None if list_only else instance_id)
+    await show(callback, _eq_text(res), markup)
     await callback.answer()
 
 
@@ -299,6 +372,7 @@ async def cb_natal_action(callback: CallbackQuery):
         return
     parts = action.split(":")
     op = parts[1] if len(parts) > 1 else ""
+    instance_id = None
     try:
         instance_id = int(parts[2]) if len(parts) == 3 else None
         if op == "bind" and instance_id is not None:
@@ -312,7 +386,7 @@ async def cb_natal_action(callback: CallbackQuery):
     except ValueError:
         res = {"status": "bad_request"}
     res = {**res, "action": op}
-    await show(callback, _natal_text(res), section_back_markup("↩️ 返回法宝", "skills:cat:equipment"))
+    await show(callback, _natal_text(res), _equipment_back_markup(instance_id))
     await callback.answer()
 
 
@@ -344,7 +418,7 @@ async def cb_equip(callback: CallbackQuery):
     if not action or not action.startswith("equip:"):
         return
     res = await character.equip_instance(callback.from_user.id, int(action[6:]))
-    await show(callback, _result_text(res), section_back_markup("↩️ 返回功法", "nav:skills"))
+    await show(callback, _result_text(res), _equipment_back_markup())
     await callback.answer()
 
 
