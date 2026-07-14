@@ -6,9 +6,9 @@ import secrets
 import time
 from typing import Optional
 
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot.presentation import show
 from models import db
 
 NEED_START = "道友尚未踏入仙途，请先发送 /start 测灵根、开启修行。"
@@ -193,13 +193,3 @@ def progress_bar(cur: int, total: int, width: int = 10) -> str:
         return "▰" * width
     filled = max(0, min(width, int(width * cur / total)))
     return "▰" * filled + "▱" * (width - filled)
-
-
-async def show(callback, text: str, markup=None):
-    """编辑回调消息；内容未变则静默，不可编辑则补发。"""
-    try:
-        await callback.message.edit_text(text, reply_markup=markup)
-    except TelegramBadRequest as e:
-        if "not modified" in str(e).lower():
-            return
-        await callback.message.answer(text, reply_markup=markup)
