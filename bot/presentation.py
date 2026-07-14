@@ -78,6 +78,12 @@ def _rich_error_category(exc: TelegramBadRequest) -> str | None:
     text = str(exc).lower()
     if "can't parse" in text and ("rich" in text or "entities" in text):
         return "解析失败"
+    if "method not found" in text:
+        return "接口不支持"
+    if "rich_message" in text and any(term in text for term in (
+            "unknown", "unexpected", "not found", "unsupported",
+            "not supported")):
+        return "接口不支持"
     if "rich message" in text and (
             "unsupported" in text or "not supported" in text):
         return "接口不支持"

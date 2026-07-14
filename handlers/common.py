@@ -22,7 +22,8 @@ def battle_report_page(
         *, page: str, title: str, outcome: str, log: list[str],
         rewards: list[str], status: list[str]) -> RichPage:
     """构造折叠斗法战报；日志折叠，所得与状态摘要保持可见。"""
-    log_text = "\n".join(log) if log else "斗法无可记述。"
+    log_rows = log or ["斗法无可记述。"]
+    log_text = "\n".join(log_rows)
     fallback_parts = [
         Bold(title), "\n", outcome,
         "\n\n", ExpandableBlockQuote(Bold("斗法经过"), "\n", log_text),
@@ -49,7 +50,7 @@ def battle_report_page(
         f"<h1>{escape_rich_html(title)}</h1>"
         f"<p><b>{escape_rich_html(outcome)}</b></p>"
         "<details><summary>斗法经过</summary>"
-        + "".join(f"<p>{escape_rich_html(row)}</p>" for row in log)
+        + "".join(f"<p>{escape_rich_html(row)}</p>" for row in log_rows)
         + "</details>" + reward_html + status_html)
     return RichPage(
         page=page,

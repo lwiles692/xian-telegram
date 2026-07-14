@@ -135,6 +135,27 @@ async def test_answer_and_send_fall_back_after_rich_format_error(monkeypatch, ca
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error_text", [
+    "Bad Request: method not found",
+    "Bad Request: unknown rich_message field",
+    "Bad Request: unexpected rich_message payload",
+])
+async def test_answer_and_send_fall_back_for_rich_capability_errors(
+        monkeypatch, error_text):
+    error = _bad_request(error_text)
+    page = RichPage("capability", "<h1>能力</h1>", Text("实体回退"))
+    message = FakeMessage(rich_error=error)
+    bot = FakeBot(rich_error=error)
+    monkeypatch.setenv("RICH_MESSAGES_ENABLED", "true")
+
+    await answer(message, page)
+    await send(bot, 7, page)
+
+    assert [kind for kind, _kwargs in message.answers] == ["rich", "regular"]
+    assert [kind for kind, _kwargs in bot.sent] == ["rich", "regular"]
+
+
+@pytest.mark.asyncio
 async def test_show_falls_back_only_for_rich_format_errors(monkeypatch, caplog):
     page = RichPage("battle", "<h1>战报</h1>", Text(Bold("战报")))
     rich_error = _bad_request("Bad Request: can't parse rich message; 密文<&>")

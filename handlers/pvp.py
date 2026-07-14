@@ -46,6 +46,7 @@ def _text(res: dict, opponent_name: str = "对手"):
             status=[
                 f"天梯积分 {res['rating_delta']:+d}{tier_txt}",
                 f"{rep_txt}。周榜奖池按声望排名结算。",
+                "本场不消耗气血、法力与精力。",
             ],
         )
     if s == "no_opponent":

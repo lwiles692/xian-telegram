@@ -92,6 +92,22 @@ def test_battle_report_hides_log_but_keeps_summary_visible():
     assert all(value in plain_text(page) for value in (marker, "123", "10/20", "7"))
 
 
+def test_battle_report_uses_same_placeholder_for_empty_log_in_both_formats():
+    from handlers.common import battle_report_page
+
+    page = battle_report_page(
+        page="empty_battle",
+        title="⚔️ 战报",
+        outcome="无胜负",
+        log=[],
+        rewards=[],
+        status=[],
+    )
+
+    assert "斗法无可记述。" in plain_text(page)
+    assert "斗法无可记述。" in page.rich_html
+
+
 def _assert_rich_result(content, expected_values):
     assert isinstance(content, RichPage)
     assert "<details>" in content.rich_html
@@ -167,7 +183,9 @@ def test_pvp_result_becomes_rich_report():
         "reputation_counted": True,
     })
 
-    _assert_rich_result(content, ("攻方<&>_#[]()", "守方<&>_#[]()", "+19", "声望 +3"))
+    _assert_rich_result(content, ("攻方<&>_#[]()", "守方<&>_#[]()", "+19", "声望 +3",
+                                  "本场不消耗气血、法力与精力"))
+    assert "本场不消耗气血、法力与精力" in content.rich_html
 
 
 @pytest.mark.parametrize("renderer", [

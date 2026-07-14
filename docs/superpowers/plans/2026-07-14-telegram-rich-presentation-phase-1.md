@@ -1032,7 +1032,7 @@ return battle_report_page(
 )
 ```
 
-秘境使用 `page="dungeon_result"`，标题包含秘境名和深入层数；PvP 使用 `page="pvp_result"`，标题包含攻守双方名，`outcome` 保留 `_outcome_text()`、天梯积分、段位和声望信息。PvP 无独立资源掉落时传 `rewards=[]`，把积分与声望放在 `status`。
+秘境使用 `page="dungeon_result"`，标题包含秘境名和深入层数；PvP 使用 `page="pvp_result"`，标题包含攻守双方名，`outcome` 保留 `_outcome_text()`、天梯积分、段位和声望信息。PvP 无独立资源掉落时传 `rewards=[]`，把积分与声望放在 `status`，并在 Rich 与实体回退的战报摘要中明确显示“本场不消耗气血、法力与精力”（切磋资源例外不修改服务层数值或重新查询资源）。
 
 `handlers/explore.py`、`handlers/dungeon.py` 的命令首页仍为纯字符串；本任务只迁移 `status == "ok"` 的结算。三个 callback 继续调用统一 `show()`，按钮标记不变。
 
