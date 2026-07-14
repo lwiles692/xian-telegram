@@ -6,6 +6,7 @@ import pytest
 import pytest_asyncio
 
 from config import realms as R
+from bot.presentation import plain_text
 from models import db
 from services import ascension, character, settle
 
@@ -263,8 +264,8 @@ async def test_overflow_notice_three_surfaces_include_deadline_and_recovery(temp
     await db.execute("UPDATE characters SET root_bone=0 WHERE user_id=?", (uid,))
     await _set_overflow_grace_until(grace_until)
 
-    version_notice = await help_handler.render_version_notice()
-    help_text = await help_handler.render_help()
+    version_notice = plain_text(await help_handler.render_version_notice())
+    help_text = plain_text(await help_handler.render_help())
     await character.start_seclusion(uid, now=1000)
     res = await character.collect_seclusion(uid, now=1000 + 1800)
     collect_text = cultivate_handler._collect_text(res)
