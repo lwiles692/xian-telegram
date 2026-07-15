@@ -5,7 +5,7 @@
 > 范围：境界上限→合体圆满；新增灵兽、奇遇、征途（Roguelike秘境）、镇妖塔、洞府/灵田、神通对决层。
 > 本文件只记录需要实现、迁移、验收或明确排除的技术规格。
 
-文档状态：**设计草案，已与用户商定范围（2026-07-14）；专家审核后二次修订**。
+文档状态：**设计草案，已与用户商定范围（2026-07-14）；专家审核后二次修订；实现审查后补强会话、通知、周榜与迁移模型（2026-07-15）**。
 数值标注"初版可调"者均需配合 `tools/balance_sim.py` 与上线数据继续调参。
 
 ---
@@ -49,14 +49,14 @@ v3 落地的这些能力，四期必须复用而不是另起炉灶：
 | 溢出分流 `overflow_split` 按 `len(REALM_NAMES)` 自动上移 | 追加 realm 6 即生效；降档宽限期机制（`game_flags`）复用，M0 重写宽限截止 |
 | 世界 Boss 分档 + 按群内人数缩放 | 新增合体 Boss 档 `heti` |
 | 拍卖行（英式+buyout、escrow 实扣、防狙击、实例托管 `status`、审计） | 新增 kind `'beast'`；灵兽上拍复用全链路 |
-| `callback_tokens` + `db.transaction()` | 捕捉/放生/守猎/征途结算/洞府升级/镇妖塔挑战全部走一次性 token + 原子事务 |
+| `callback_tokens` + `db.transaction()` | 捕捉/放生/守猎/征途结算/洞府升级/镇妖塔挑战全部走 15 分钟一次性 token + 原子事务；超时需自动结算的奇遇另存业务会话，不把业务状态塞入 token 表 |
 | `game_events` 领域事件 | 合体突破、稀有灵兽、天价成交、链式奇遇大机缘、镇妖塔百层首通进入播报 |
 | 绑定库存 `inventory(bound)` | 守猎/灵田普通产出、进阶材料默认 `bound=1`；灵田精品产出用独立 item_key、`bound=0` |
 | buff 合算 clamp（ATTACK/SURVIVAL 0.25、SECLUSION 0.60） | 奇遇/洞府轻数值加成接入 clamp；灵兽不进 clamp |
 | `config.events` + ENCOUNTERS | **迁移并扩展**现有遭遇表，不平行新建；新奇遇事件以相同结构追加 |
 | `tools/balance_sim.py` 多档 profile | 新增炼虚满 buff 档、合体各档、有兽档矩阵 |
-| 通知任务（ready-action notify，每 1 分钟） | 守猎到期、灵田成熟、链式奇遇到期全部复用 |
-| `character_skills` | **M6 迁移**：拆为 `character_learned_skills` + `character_equipped_skills`（§9.2）；迁移前新功法以现有结构暂存，M6 统一迁移 |
+| 通知任务（ready-action notify，每 1 分钟） | 守猎到期、灵田成熟、链式奇遇到期全部复用；各业务表统一保存 `notified_at` / `notify_attempts`，成功后去重、失败最多重试 5 次 |
+| `character_skills` | **M6 分两次发布迁移**：M6a 建新表并镜像现有写入，M6b 切换新表并开放第 4 槽/新神通（§9.2）；M4/M5 提前掉落的 v4 神通残页仅入背包，M6b 前不可使用 |
 
 当前实现约束：
 
@@ -223,7 +223,7 @@ v3 落地的这些能力，四期必须复用而不是另起炉灶：
 
 ### 4.2 捕捉
 
-**触发**：元婴期起，在配置了灵兽出没的历练地图打赢一场遭遇战后，概率触发"灵兽现身"（初版 12%，可调）。玩家在 10 分钟内（一次性 token）选择是否消耗 1 根 `缚灵索` 尝试收服；超时则灵兽遁走，不计保底。
+**触发**：元婴期起，在配置了灵兽出没的历练地图打赢一场遭遇战后，概率触发"灵兽现身"（初版 12%，可调）。玩家在 15 分钟内（一次性 token，与全局 `TOKEN_TTL_SECONDS` 一致）选择是否消耗 1 根 `缚灵索` 尝试收服；超时则灵兽遁走，不计保底。
 
 **缚灵索**：炼器可制（现有材料 + 少量新图材料），不绑定、可坊市交易——是捕捉行为的主要灵石 sink。
 
@@ -300,6 +300,7 @@ v3 落地的这些能力，四期必须复用而不是另起炉灶：
 - 产出：`兽粮` 材料为主，小概率同档图普通材料、极小概率 `兽魂`；**全部绑定**，不含灵石。
 - 产出量随时长次线性（12h ≈ 4h 的 2.2 倍）；每兽每日最多 2 次派遣。
 - 守猎中的兽不可出战/上拍/放生；到期不自动收，**惰性结算** + ready-action 通知任务。
+- 每次派遣时清空 `hunt_notified_at` 并把 `hunt_notify_attempts` 归零；通知成功后写入 `hunt_notified_at`，失败沿用现有最多 5 次重试口径。
 
 ### 4.8 交易（拍卖行接入）
 
@@ -328,7 +329,9 @@ v3 落地的这些能力，四期必须复用而不是另起炉灶：
 
 **触发即计冷却**：历练/秘境/签到触发奇遇后，**立即**计入 4 小时冷却（无论玩家是否在超时内响应）。征途"遇"门不受此冷却约束（主动进门）。
 
-**超时处理**：弹出 token 超时（15 分钟），自动按**保守选项**结算。保守选项的设计约束：
+**选择会话**：奇遇触发后先写入 `adventure_choices`，再为每个选项生成 `adv:choose:<choice_id>:<option_index>` 一次性 token。配置加载时必须断言每个事件恰有一个 `conservative=true` 的保守选项。玩家已有 `status='pending'` 的选择会话时不再触发新奇遇，也不计 4 小时冷却；进行中的链式进度不占用这个选择名额。
+
+**超时处理**：选择会话与 token 统一 15 分钟有效。`adventure_service.settle_expired_choices` 每分钟扫描到期会话，在事务内调用与玩家点击相同的结算入口，自动按**保守选项**结算。服务以 `status='pending'` 条件更新抢占结算权，玩家点击与超时任务并发时只能成功一次。保守选项的设计约束：
 
 - **不消耗任何资源**（不扣灵石/精力/材料）。
 - **不获得任何实质奖励**（可以有"缘分擦肩而过"的纯文案）。
@@ -336,7 +339,7 @@ v3 落地的这些能力，四期必须复用而不是另起炉灶：
 
 这样玩家无法通过反复放弃奇遇来"筛选"触发时机——触发了就算数，选或不选（超时=保守选）。
 
-进行中的链式奇遇**不叠加**触发新链式奇遇，可叠加普通奇遇。
+进行中的链式奇遇**不叠加**触发新链式奇遇，但可与普通奇遇共存；两者通过 `adventure_chains` / `adventure_choices` 分表实现，不共享唯一索引。
 
 ### 5.3 事件结构
 
@@ -361,6 +364,7 @@ v3 落地的这些能力，四期必须复用而不是另起炉灶：
         },
         {
             "label": "谨慎绕行",            # 保守选项
+            "conservative": True,            # 每个事件必须且只能有一个
             "cost": {},
             "success_effects": {},
             "success_flavor": "你避开了这处废墟，继续赶路。",
@@ -388,7 +392,7 @@ v3 落地的这些能力，四期必须复用而不是另起炉灶：
 **赌性选项**（有 `prob_success < 1`）的失败惩罚类型：
 - **受伤**：当前 HP ×(1 - pct)，pct ∈ [0.15, 0.30]，不低于 1，不致死。
 - **损失灵石**：随机丢失相当于半日活量级。
-- **中毒 debuff**：下次历练首回合 HP -15%（存 `characters.debuff_until`）。
+- **中毒 debuff**：下次历练首回合 HP -15%。复用现有 `characters.debuff_json`，写入 `next_explore_hp_pct=0.15`；重复中毒取较高值、不叠加。下次历练出发事务在生成 `start_hp` 快照前应用并删除该键，保证只生效一次。
 - **耗损法力**：当前 MP -30%。
 - **触发战斗**：与事件怪物一战，败则受伤；胜则额外奖励（`simulate()`，出战兽参与）。
 
@@ -396,32 +400,56 @@ v3 落地的这些能力，四期必须复用而不是另起炉灶：
 
 ### 5.5 链式奇遇
 
-- 头节点触发后，在 `adventure_sessions` 表记录进度；`ready_at` 指定下一步可触发时间。
+- 头节点触发后，在 `adventure_chains` 表记录进度；`ready_at` 指定下一步可触发时间。
 - ready-action 通知任务到 `ready_at` 后推送，玩家主动触发下一步。
 - 链式最多 3 步；超时（48h）按"缘分已散"结算（无奖励，清除进度）。
 - 玩家可"放弃"（保守选项），返还已支付代价的 30%。
+- 链式下一步打开时创建一条关联 `chain_id` 的 `adventure_choices`；若已有普通选择待处理，返回 `choice_pending`，链式 48 小时截止不变。
+- 链式推进到下一步时清空 `notified_at` 并把 `notify_attempts` 归零；通知成功后写 `notified_at`，失败最多重试 5 次。
 - **M3 初版事件包**：普通 30 / 稀有 12 / 链式 4 / 大机缘 3（总计 ≥ 49），每季度追加 ≥ 10 个。
 
 ### 5.6 数据层
 
 ```sql
-adventure_sessions(
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id    INTEGER NOT NULL,
-  event_key  TEXT NOT NULL,
-  step       INTEGER NOT NULL,         -- 0=头节点, 1..N=后续步
-  ready_at   INTEGER NOT NULL,         -- 下一步可触发时间戳;当前步未完成时=创建时刻
-  expire_at  INTEGER NOT NULL,         -- 超时截止(ready_at + 48h)
-  status     TEXT NOT NULL DEFAULT 'pending',  -- 'pending'|'done'|'expired'
-  notified_at INTEGER,                 -- 通知任务已推送时间戳;NULL=未推送
-  state      TEXT                      -- 跨步共享状态 JSON(可选)
+-- 当前需要玩家选择的一步；普通奇遇与链式当前步共用，超时后保留审计记录。
+adventure_choices(
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id             INTEGER NOT NULL,
+  event_key           TEXT NOT NULL,
+  source              TEXT NOT NULL,       -- 'explore'|'dungeon'|'checkin'|'expedition'|'chain'
+  chain_id            INTEGER,
+  conservative_option INTEGER NOT NULL,
+  state               TEXT,
+  created_at          INTEGER NOT NULL,
+  expire_at           INTEGER NOT NULL,    -- created_at + 15min
+  status              TEXT NOT NULL DEFAULT 'pending', -- 'pending'|'settled'
+  settled_at          INTEGER,
+  settled_by          TEXT                 -- 'player'|'timeout'
 );
-CREATE UNIQUE INDEX idx_adv_active ON adventure_sessions(user_id)
-  WHERE status='pending';             -- 一个玩家同时只有一条进行中的链式进度
+CREATE UNIQUE INDEX idx_adv_choice_active ON adventure_choices(user_id)
+  WHERE status='pending';
+CREATE INDEX idx_adv_choice_expire ON adventure_choices(status, expire_at);
+
+-- 跨 1~3 天的链式进度；可与一条普通选择会话同时存在。
+adventure_chains(
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id         INTEGER NOT NULL,
+  event_key       TEXT NOT NULL,
+  step            INTEGER NOT NULL,
+  ready_at        INTEGER NOT NULL,
+  expire_at       INTEGER NOT NULL,        -- ready_at + 48h
+  status          TEXT NOT NULL DEFAULT 'waiting', -- 'waiting'|'ready'|'done'|'expired'
+  notified_at     INTEGER,
+  notify_attempts INTEGER NOT NULL DEFAULT 0,
+  state           TEXT
+);
+CREATE UNIQUE INDEX idx_adv_chain_active ON adventure_chains(user_id)
+  WHERE status IN ('waiting','ready');
+CREATE INDEX idx_adv_chain_ready ON adventure_chains(status, ready_at, expire_at);
 
 -- characters 追加 (_ensure_column) --
--- debuff_until INTEGER         中毒 debuff 到期时间戳;NULL=无
--- last_event_at INTEGER        上次历练/秘境触发奇遇时间戳;4h 冷却
+-- last_event_at INTEGER        上次历练/秘境/签到触发奇遇时间戳;4h 冷却
+-- 中毒等一次性状态继续存现有 debuff_json，不新增单用途时间戳列。
 ```
 
 ---
@@ -559,18 +587,18 @@ CREATE UNIQUE INDEX idx_exp_active ON expedition_runs(user_id) WHERE status='act
 
 ### 7.4 周群内排行
 
-- **周榜排名依据：本周新推进层数**（`tower_weekly_progress`，周一 0:00 重置为 0）。
+- **周榜排名依据：本周新推进层数**。进度按玩家全局记录在 `tower_week_progress(user_id, week)`，群榜通过 `bot_chat_members` 过滤本群成员。
 - 永久最高层（`characters.tower_floor`）只做常驻展示，不参与排名——防止先玩家永久霸榜。
-- 每周一 0:00 统计全群本周推进层数，排行榜发群；前 3 名获本周特殊奖励（绑定材料包）。
-- 同群跨账号奖励：奖励发放绑定，不可转移，多群账号以各群独立计算（群内生态独立）。
-- 并列时先达先排（本周内达到该推进数字的时间戳）。
+- 每周一 0:00 结算上一周：逐群统计、发放前 3 名绑定材料包，并把排行榜写入现有 `social_broadcasts` 队列异步播报。
+- 玩家进度全局共享；榜单与奖励按群独立。同一玩家属于多个群时，可在每个群分别上榜并分别获得奖励。
+- 并列时按 `reached_at` 先达先排；仍相同则按 `user_id` 升序保证确定性。
+- 周进度以 `week` 分片，不做全表归零；调度任务漏跑或重跑都不会覆盖下一周进度。
 
 ### 7.5 数据层
 
 ```sql
 -- characters 追加 (_ensure_column) --
 -- tower_floor INTEGER NOT NULL DEFAULT 0   永久最高层
--- tower_week_progress INTEGER NOT NULL DEFAULT 0  本周新推进层数(周一重置)
 
 tower_daily(
   user_id    INTEGER NOT NULL,
@@ -578,9 +606,39 @@ tower_daily(
   fail_count INTEGER NOT NULL DEFAULT 0,  -- 当日连续失败计数（通过后清零）
   PRIMARY KEY(user_id, day)
 );
+
+tower_week_progress(
+  user_id    INTEGER NOT NULL,
+  week       TEXT NOT NULL,               -- 'YYYY-WW'(Asia/Shanghai，与现有 _week 口径一致)
+  progress   INTEGER NOT NULL DEFAULT 0,
+  reached_at INTEGER NOT NULL,             -- 达到当前 progress 的时间戳，供并列排序
+  PRIMARY KEY(user_id, week)
+);
+CREATE INDEX idx_tower_week_rank
+  ON tower_week_progress(week, progress DESC, reached_at, user_id);
+
+tower_weekly_settlements(
+  chat_id    INTEGER NOT NULL,
+  week       TEXT NOT NULL,
+  settled_at INTEGER NOT NULL,
+  PRIMARY KEY(chat_id, week)
+);
+
+tower_weekly_rewards(
+  chat_id     INTEGER NOT NULL,
+  user_id     INTEGER NOT NULL,
+  week        TEXT NOT NULL,
+  rank        INTEGER NOT NULL,
+  progress    INTEGER NOT NULL,
+  reward_json TEXT NOT NULL,
+  settled_at  INTEGER NOT NULL,
+  PRIMARY KEY(chat_id, user_id, week)
+);
 ```
 
-周一重置 `tower_week_progress=0` 由 APScheduler 现有周任务承载（复用 PvP weekly settle 的触发时机，周一 0:00 新增一个 job）。
+挑战新高层时，在同一事务内更新 `characters.tower_floor`，并对当前周 `tower_week_progress` 执行 UPSERT：`progress += 新推进层数`、`reached_at = now`。
+
+周一 0:00 新增 `tower_service.settle_weekly`：以 `now - 1` 秒确定上一周标签；每个群在事务内先插入 `tower_weekly_settlements` 抢占结算权，再写奖励流水、发绑定奖励并入队群播报。重复执行遇到既有 `(chat_id, week)` 时直接跳过，保证不重复发奖；某个群失败不影响其他群后续重试。
 
 ---
 
@@ -628,8 +686,8 @@ tower_daily(
 3. 成熟时不自动收获；**惰性结算**：下次查看灵田时落账，成熟后不腐坏（可以拖着收）。
 4. **施灵**：成熟后收获前可选择消耗 1 枚 `灵液`（炼器可制），产出升级为精品 item_key（不绑定）。
 5. **一键收获**：一次按钮收全部已熟格，减少操作次数。
-6. **一键补种**：按上次该格的种子配方自动补种（需库存中有对应种子）。
-7. ready-action 通知任务在成熟时推送。
+6. **一键补种**：按该格 `last_seed_key` 自动补种（需库存中有对应种子）；收获清空当前 `seed_key`，但保留 `last_seed_key`。
+7. ready-action 通知任务在成熟时推送；每次种植清空 `notified_at` 并把 `notify_attempts` 归零，成功通知后不重复推送。
 
 **种子来源**：坊市/拍卖行流通（不绑定）；炼虚/合体地图中低概率产出高阶种子；部分链式奇遇终端奖励含稀有种子。
 
@@ -643,10 +701,13 @@ estate_plots(
   user_id     INTEGER NOT NULL,
   slot        INTEGER NOT NULL,           -- 0~9，随洞府等级解锁
   seed_key    TEXT,                       -- NULL = 空格
+  last_seed_key TEXT,                     -- 最近一次种植配方，供一键补种
   planted_at  INTEGER,
   mature_at   INTEGER,
   is_mature   INTEGER NOT NULL DEFAULT 0,
   ling_used   INTEGER NOT NULL DEFAULT 0, -- 已施灵标记
+  notified_at INTEGER,
+  notify_attempts INTEGER NOT NULL DEFAULT 0,
   UNIQUE(user_id, slot)
 );
 
@@ -664,7 +725,7 @@ estate_plots(
 
 ### 9.2 数据模型：拆两张表
 
-现有 `character_skills` 以 `(user_id, slot)` 为主键，`slot=-2` 无法保存多个未装备神通。**M6 迁移至两张表**：
+现有 `character_skills` 以 `(user_id, slot)` 为主键，已学状态与装备槽位合一；槽位占满后学习新功法会覆盖既有槽位，无法保存多个未装备神通。**M6 分两次发布迁移至两张表**：
 
 ```sql
 -- 已学会的所有功法（含未装备）
@@ -681,20 +742,25 @@ character_equipped_skills(
   slot      INTEGER NOT NULL,  -- -1=心法槽; 0..3=战斗槽
   skill_key TEXT NOT NULL,
   PRIMARY KEY(user_id, slot),
+  UNIQUE(user_id, skill_key),  -- 同一功法不可重复占多个槽位
   FOREIGN KEY(user_id, skill_key) REFERENCES character_learned_skills
 );
 ```
 
-**迁移策略（M6 执行）**：
+**迁移策略（M6a 执行，扩表与镜像期）**：
 
 ```sql
--- 迁移现有 character_skills 数据：
-INSERT INTO character_learned_skills(user_id, skill_key, learned_at)
+-- 由幂等 _migrate_character_skills(conn) 执行：
+INSERT OR IGNORE INTO character_learned_skills(user_id, skill_key, learned_at)
   SELECT DISTINCT user_id, skill_key, 0 FROM character_skills;
-INSERT INTO character_equipped_skills(user_id, slot, skill_key)
+INSERT OR IGNORE INTO character_equipped_skills(user_id, slot, skill_key)
   SELECT user_id, slot, skill_key FROM character_skills WHERE slot >= -1;
--- M6 上线后删除旧表
 ```
+
+- 迁移后断言：新表已学数量 = 旧表 `(user_id, skill_key)` 去重数量；装备槽映射逐行一致；同一技能不存在重复装备。
+- **M6a**：读取仍走旧表；现有学习、装备、卸下在同一事务内写旧表并镜像新表。第 4 槽和 v4 新神通尚不开放，提前掉落的神通残页使用时返回 `feature_pending`，避免旧表无法表达未装备技能。
+- **M6b（至少间隔一个发布周期）**：复验数量与槽位后把读取切到新表，开放第 4 槽和 v4 新神通；旧表转为只读保留，不再双写。
+- **M6 不删除旧表**。v4.1 再由幂等 `_migrate_character_skills_cleanup(conn)` 删除 `character_skills`；清理前重复执行上述断言。
 
 **战斗槽动态化**：`COMBAT_SLOTS` 不再是全局常量。服务层改为 `combat_slots_for(character)` 函数，合体初期+天人劫条件满足（`extra_skill_slots=1`）时返回 `range(4)`，否则返回 `range(3)`。合体前的角色行为与现行完全一致。
 
@@ -720,7 +786,7 @@ INSERT INTO character_equipped_skills(user_id, slot, skill_key)
 
 ### 9.5 新功法池
 
-**合体期神通**（初版 8 个，按 `realm_min=6` 限制学习；以**神通残页**形态掉落，使用即学习，绑定）：
+**合体期神通**（初版 8 个，按 `realm_min=6` 限制学习；以**神通残页**形态掉落，绑定；M6b 开放后使用即学习，M6b 前使用返回 `feature_pending` 且不消耗）：
 
 | 神通 | 类型 | 行为 | MP | CD | 来源 |
 |---|---|---|---:|---:|---|
@@ -813,7 +879,8 @@ config.estate:     洞府等级表(升级条件/格数/功能);种子配置表(�
 config.tower:      镇妖塔层配置(怪物/首通奖励);无 game_flags 存储
 config.auction:    kind 'beast' 底价表;稀有兽/天价播报阈值;精品灵田产出白名单
 game_flags:        overflow_demote_grace_until 重写=v4 M0部署时刻+28天
-APScheduler jobs:  新增周一0:00 job，重置全群 characters.tower_week_progress=0
+APScheduler jobs:  新增 adventure_service.settle_expired_choices 每1分钟；
+                   新增 tower_service.settle_weekly 周一0:00幂等结算上一周群榜
 ```
 
 ### 12.2 表结构
@@ -821,16 +888,20 @@ APScheduler jobs:  新增周一0:00 job，重置全群 characters.tower_week_pro
 ```sql
 -- ① 灵兽 --
 spirit_beasts(id, owner_id, species_key, nickname, level, star, aptitude,
-  status, hunt_end_at, hunt_hours, captured_at);
+  status, hunt_end_at, hunt_hours, hunt_notified_at, hunt_notify_attempts, captured_at);
 CREATE INDEX idx_beasts_owner ON spirit_beasts(owner_id, status);
 CREATE INDEX idx_beasts_hunt  ON spirit_beasts(status, hunt_end_at);
 
 hunt_daily(beast_id INTEGER, day TEXT, count INTEGER DEFAULT 0, PRIMARY KEY(beast_id,day));
 
 -- ② 奇遇 --
-adventure_sessions(id, user_id, event_key, step, ready_at, expire_at,
-  status DEFAULT 'pending', notified_at, state);
-CREATE UNIQUE INDEX idx_adv_active ON adventure_sessions(user_id) WHERE status='pending';
+adventure_choices(id, user_id, event_key, source, chain_id, conservative_option,
+  state, created_at, expire_at, status DEFAULT 'pending', settled_at, settled_by);
+CREATE UNIQUE INDEX idx_adv_choice_active ON adventure_choices(user_id) WHERE status='pending';
+adventure_chains(id, user_id, event_key, step, ready_at, expire_at,
+  status DEFAULT 'waiting', notified_at, notify_attempts, state);
+CREATE UNIQUE INDEX idx_adv_chain_active ON adventure_chains(user_id)
+  WHERE status IN ('waiting','ready');
 
 -- ③ 征途（命名与历练完全分开）--
 expedition_runs(id, user_id, tier, floor, hp_snapshot, mp_snapshot,
@@ -840,27 +911,30 @@ CREATE UNIQUE INDEX idx_exp_active ON expedition_runs(user_id) WHERE status='act
 
 -- ④ 镇妖塔 --
 tower_daily(user_id INTEGER, day TEXT, fail_count INTEGER DEFAULT 0, PRIMARY KEY(user_id,day));
+tower_week_progress(user_id, week, progress, reached_at, PRIMARY KEY(user_id,week));
+tower_weekly_settlements(chat_id, week, settled_at, PRIMARY KEY(chat_id,week));
+tower_weekly_rewards(chat_id, user_id, week, rank, progress, reward_json, settled_at,
+  PRIMARY KEY(chat_id,user_id,week));
 
 -- ⑤ 洞府/灵田 --
-estate_plots(id, user_id, slot, seed_key, planted_at, mature_at, is_mature, ling_used,
-  UNIQUE(user_id, slot));
+estate_plots(id, user_id, slot, seed_key, last_seed_key, planted_at, mature_at,
+  is_mature, ling_used, notified_at, notify_attempts, UNIQUE(user_id, slot));
 
 -- ⑥ 神通（M6 迁移）--
 character_learned_skills(user_id INTEGER, skill_key TEXT, learned_at INTEGER,
   PRIMARY KEY(user_id, skill_key));
 character_equipped_skills(user_id INTEGER, slot INTEGER, skill_key TEXT,
-  PRIMARY KEY(user_id, slot));
--- M6 上线后废弃 character_skills（先并行运行一个版本，确认迁移正确后再删）
+  PRIMARY KEY(user_id, slot), UNIQUE(user_id, skill_key));
+-- M6a 旧表读取+镜像新表；M6b 切新表并冻结旧表；v4.1 验证后再幂等删除。
 
 -- characters 迁移 (_ensure_column，幂等) --
 -- active_beast_id INTEGER
 -- beast_capture_streak INTEGER NOT NULL DEFAULT 0
--- debuff_until INTEGER
 -- last_event_at INTEGER
 -- tower_floor INTEGER NOT NULL DEFAULT 0
--- tower_week_progress INTEGER NOT NULL DEFAULT 0
 -- estate_level INTEGER NOT NULL DEFAULT 0
 -- extra_skill_slots INTEGER NOT NULL DEFAULT 0
+-- 奇遇一次性中毒复用现有 debuff_json，不新增 debuff_until。
 
 -- big_fail_streak 无 schema 变更；读取范围扩展至 realm 5→6，更新注释与单测 --
 -- auctions 无 schema 变更；kind 新增 'beast'，instance_id 指向 spirit_beasts.id --
@@ -892,7 +966,7 @@ handlers/estate.py     # callback 前缀 estate:
 
 bot/app.py             # 注册 /beast /venture /tower /estate；
                        # 守猎到期/灵田成熟/链式奇遇到期并入现有1分钟通知任务；
-                       # APScheduler 新增周一0:00 job（tower_week_progress 重置）
+                       # 奇遇选择超时每1分钟幂等结算；周一0:00幂等结算上一周群榜
 ```
 
 ---
@@ -929,10 +1003,10 @@ bot/app.py             # 注册 /beast /venture /tower /estate；
 
 **M2（灵兽核心）**
 
-- 捕捉：胜利触发；超时遁走不计保底；streak 递增/清零/≤90%；兽栏满不触发；缺灵索拒绝。
+- 捕捉：胜利触发；15 分钟超时遁走不计保底；streak 递增/清零/≤90%；兽栏满不触发；缺灵索拒绝。
 - 兽栏与状态机：`active_beast_id` 与 status 同事务一致；兽栏 ≤3 并发插入事务兜底；hunt/auction 态全路径拒绝。
 - 养成：等级上限随主人境界；星级消耗同档兽魂；放生返还兽魂绑定；交易后等级/星级/资质随实例保留。
-- 守猎：4/8/12h 产出次线性；每兽每日 ≤2 次；产出全绑定无灵石；惰性结算幂等；守猎中不可出战。
+- 守猎：4/8/12h 产出次线性；每兽每日 ≤2 次；产出全绑定无灵石；惰性结算幂等；守猎中不可出战；到期通知成功只发一次、失败最多重试 5 次，新派遣重置通知状态。
 - 支援单位引擎：`a_support/d_support=None` 时输出逐字节不变；兽在主人行动后出手；主人定身时兽蛰伏；`HARD_ROUND_CAP` 兜底不变。
 - 贡献占比：满养兽 DPS ≤15%；兽疗每回合 ≤3% max_hp；定身无锁死（固定 seed 穷举）。
 - 存量门槛复检："刚解锁可刷"不因带兽提前一小阶以上；无兽满 buff 档维持原结论。
@@ -940,10 +1014,12 @@ bot/app.py             # 注册 /beast /venture /tower /estate；
 **M3（奇遇系统）**
 
 - 触发率与冷却：历练 8%/秘境 5%/签到 2%；**触发即计 4h 冷却**，不论玩家是否响应。
-- 超时：15 分钟 token 过期后自动按保守选项结算；保守选项不扣资源不给奖励；链式超时按"缘分已散"结算（清除进度，无奖励）。
+- 选择会话：每个事件恰有一个 `conservative=true` 选项；`adventure_choices` 同时最多 1 条 pending；已有选择时不触发新事件、不计冷却。
+- 超时：15 分钟后 `settle_expired_choices` 与玩家点击争抢同一 `status='pending'` 条件，只能结算一次；保守选项不扣资源不给奖励；链式超时按"缘分已散"结算（清除进度，无奖励）。
 - 事件结算：success/failure_effects 分支正确；代价消耗原子性；受伤不致死；灵石损失不超档。
+- 中毒：只写 `debuff_json.next_explore_hp_pct`；下次历练生成出发快照前消费并清除，重复中毒不叠加。
 - chain_next 在选项级生效：不同选项走不同链式后续。
-- 链式进度：unique index 保证同时只有 1 条；ready_at / expire_at / notified_at 三项正确持久化；通知任务在 ready_at 后推送 notified_at 写入。
+- 链式进度：`adventure_chains` unique index 保证同时只有 1 条 active；可与普通选择共存；ready_at / expire_at / notified_at / notify_attempts 正确持久化，通知成功去重、失败最多重试 5 次。
 - 大机缘概率 ≤1%；稀有灵兽出没走正常捕捉流程（不绕过 streak）。
 
 **M4（征途模式 + 镇妖塔）**
@@ -952,19 +1028,20 @@ bot/app.py             # 注册 /beast /venture /tower /estate；
 - run 内 buffs 只活在 run 里（退出后清空）；战败 HP 恢复至 30% 后继续；护法符消耗标记幂等；强制退出奖励 ×70%；见好就收 ×100%；失败 3 次强制退出。
 - current_doors 在层内稳定（重新打开面板不重新 roll 门）；floor_settled 防重复结算。
 - 征途 + 灵兽：兽参与每层战斗；定身兽与精英门交互无控制链叠加。
-- 镇妖塔：`tower_floor` 只进不退；首通奖励在事务内比较旧值发放（非 game_flags）；连续失败 3 次当日该层锁定；周一重置 `tower_week_progress=0` 正确执行。
+- 镇妖塔：`tower_floor` 只进不退；首通奖励在事务内比较旧值发放（非 game_flags）；连续失败 3 次当日该层锁定。
+- 镇妖塔周榜：周进度按 `(user_id, week)` 分片；各群按成员独立排行和发奖，多群玩家可多群获奖；并列按 `reached_at/user_id`；重复执行周结算不重复发奖或重复入队播报。
 - 镇妖塔全层档 balance_sim：目标档位满 buff 有兽档刚好可刷；无兽档"可努力打过"。
 - **周事件总量审计（M4 上线前执行）**：新增每日主动操作目标 ≤5 分钟。
 
 **M5（洞府/灵田）**
 
 - 洞府升级：消耗原子性；等级上限 5；格数随等级解锁；重复升级请求幂等。
-- 灵田：planted_at/mature_at 正确记录；惰性成熟（重复查看不重复发）；施灵精品用独立 item_key 且不绑定；一键收获/一键补种正确执行；成熟通知在 ready_at 推送一次（notified_at 防重发）。
+- 灵田：planted_at/mature_at 正确记录；惰性成熟（重复查看不重复发）；施灵精品用独立 item_key 且不绑定；`last_seed_key` 支撑一键补种；成熟通知按 mature_at 推送一次（notified_at 防重发、失败最多重试 5 次、新种植重置状态）。
 - 精品产出价格纳入每周价格巡检；单格最大产出值 ≤ 当档历练 1 天收益 30%。
 
 **M6（神通对决层 + 灵兽全面参战 + 收尾）**
 
-- character_skills 迁移：数据完整；character_learned_skills + character_equipped_skills 均正确填充；旧表并行运行一版再删。
+- character_skills 迁移：M6a 幂等填充并镜像现有写入、读取仍走旧表；至少一个发布周期后 M6b 复验并切新表，开放第 4 槽/新神通；M6 不删旧表，v4.1 再清理。
 - `combat_slots_for(character)` 返回正确槽数；炼虚及以下仍 3 槽；simulate 确定性不变（固定 seed 回归）。
 - heal/shield/stun/heal+ 技能条件：heal<70%才释放（满血跳过）；stun跳过已定身目标；战报展示跳过原因。
 - 8 个新神通各有效果单测。
@@ -980,10 +1057,10 @@ bot/app.py             # 注册 /beast /venture /tower /estate；
 | **V4-M0 合体开放** | v3 收口（§1.1）+ 合体配置/合体丹（残方+签到保底+失败累计保底）/三张历练图/合体突破（天人劫+直面心魔）+ 降档宽限重写与公告（上线前置验收）+ M1 线索预埋 | 炼虚圆满玩家获得合体突破与新地图成长目标 |
 | **V4-M1 合体完整链路** | 九天玄宫/合体 Boss/合体装备材料炼制链/合体 GEARED 档回归 | 合体期 PvE、群 Boss 与装备链完整 |
 | **V4-M2 灵兽核心** | 捕捉（缚灵索+递增保底）/兽栏/出战/喂养/支援单位引擎/PvE 参战（历练/秘境/世界 Boss）/有兽档矩阵+存量门槛复检 | 元婴+玩家获得"捕捉→养成→参战"完整闭环 |
-| **V4-M3 奇遇系统** | 迁移扩展现有 ENCOUNTERS + 奇遇引擎（`services/adventure.py`）+ 初版事件包（≥49 事件）+ 链式奇遇 + 大机缘 + 负面结果全类型 | 历练/秘境有随机事件，每次行动带期待感；可玩性骨架建立 |
-| **V4-M4 征途模式 + 镇妖塔** | 征途（四档/门系统/run 内增益/贪深惩罚/令牌制）+ 奇遇事件表复用（遇门）+ 镇妖塔（全层配置/首通奖励/周新推进榜）+ 灵兽参战 + 周事件总量审计 | 玩家有 Roguelike 决策体验；有永久攀塔进度可追求 |
+| **V4-M3 奇遇系统** | 迁移扩展现有 ENCOUNTERS + 奇遇引擎（选择会话超时结算/链式进度分表）+ 初版事件包（≥49 事件）+ 链式奇遇 + 大机缘 + 负面结果全类型 | 历练/秘境有随机事件，每次行动带期待感；可玩性骨架建立 |
+| **V4-M4 征途模式 + 镇妖塔** | 征途（四档/门系统/run 内增益/贪深惩罚/令牌制）+ 奇遇事件表复用（遇门）+ 镇妖塔（全层配置/首通奖励/按周分片的群内推进榜与幂等奖励）+ 灵兽参战 + 周事件总量审计 | 玩家有 Roguelike 决策体验；有永久攀塔进度可追求 |
 | **V4-M5 洞府与灵田** | 洞府（5 级升级链/材料 sink）+ 灵田（6 种种子/惰性结算/施灵精品独立 item_key/一键收获补种）+ 通知任务接入 | 管理循环补完；合体材料有新长期 sink |
-| **V4-M6 神通对决层 + 全面参战 + 收尾** | character_skills 迁移两张表 + `combat_slots_for` 函数 + 第 4 上阵槽（合体初期解锁）+ 8 个合体神通 + `_choose_skill` 基础条件 + PvP 天梯带兽 + 宗门战带兽（守卫补偿）+ 控制预算 PvP 回归 + 周事件总量收尾审计 + 文档/引导收尾 | 全部战斗场景带兽；技能 build 深度完整；系统融合收尾 |
+| **V4-M6 神通对决层 + 全面参战 + 收尾** | M6a 扩表迁移与镜像期；M6b 切换新表（旧表清理留 v4.1）+ `combat_slots_for` 函数 + 第 4 上阵槽（合体初期解锁）+ 8 个合体神通 + `_choose_skill` 基础条件 + PvP 天梯带兽 + 宗门战带兽（守卫补偿）+ 控制预算 PvP 回归 + 周事件总量收尾审计 + 文档/引导收尾 | 全部战斗场景带兽；技能 build 深度完整；系统融合收尾 |
 
 **里程碑依赖顺序**：境界链先行（M0→M1）；灵兽（M2）在合体 M1 定参之后；奇遇底座（M3）必须在征途（M4）之前；神通两张表迁移（M6）在所有神通残页掉落机制（M4/M5）稳定后执行。
 
