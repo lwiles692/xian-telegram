@@ -11,6 +11,7 @@ from config.items import item_name
 from config.maps import lower_maps, maps_at_realm
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
                              battle_vitals_lines, consume_action_callback,
+                             battle_report_page,
                              guard_private_callback, guard_private_message,
                              section_back_markup, show, vitals_line)
 from services import character
@@ -108,7 +109,7 @@ def _minutes(seconds: int) -> str:
     return f"{minutes} 分钟"
 
 
-def _result_text(res: dict) -> str:
+def _result_text(res: dict):
     s = res["status"]
     if s == "started":
         return (
@@ -145,28 +146,37 @@ def _result_text(res: dict) -> str:
         return "查无此地。"
     log = res["log"]
     shown = log if len(log) <= 11 else (log[:10] + ["……", log[-1]])
-    lines = []
+    prefix = []
     if res.get("sweep"):
-        lines.append(f"⚡ 扫荡 {res['map']}。")
+        prefix.append(f"⚡ 扫荡 {res['map']}。")
     if res["is_boss"]:
-        lines.append("🐲 妖王现身！")
-    lines += shown
+        prefix.append("🐲 妖王现身！")
+    outcome_parts = prefix
     if res["win"]:
         rw = res["reward"]
-        parts = [f"🪙{rw['stone']}", f"修为+{rw['cult']}"]
+        reward_lines = [f"🪙 {rw['stone']}", f"修为 +{rw['cult']}"]
         if rw.get("daohang"):
-            parts.append(f"道行+{rw['daohang']}")
+            reward_lines.append(f"道行 +{rw['daohang']}")
         if rw["drops"]:
-            parts.append("、".join(f"{item_name(k)}×{v}" for k, v in rw["drops"].items()))
-        lines.append("🎁 战利品：" + "，".join(parts))
+            reward_lines.append("、".join(
+                f"{item_name(k)}×{v}" for k, v in rw["drops"].items()))
+        outcome_parts.append("历练大捷。")
     elif res.get("defeat_reason") == "round_limit":
-        lines.append(
+        reward_lines = []
+        outcome_parts.append(
             f"久战 {round_limit_label()}未决，按剩余气血比例判负，重伤而归（修为、装备无损，养息后再来）。")
     else:
-        lines.append("道友力竭，重伤而归（修为、装备无损，养息后再来）。")
-    lines += battle_vitals_lines(res)
-    lines.append(f"⚡ 精力余 {res['stamina_left']}")
-    return "\n".join(lines)
+        reward_lines = []
+        outcome_parts.append("道友力竭，重伤而归（修为、装备无损，养息后再来）。")
+    title = f"⚔️ {res['map']}·{'大捷' if res['win'] else '重伤而归'}"
+    return battle_report_page(
+        page="explore_result",
+        title=title,
+        outcome="\n".join(outcome_parts),
+        log=shown,
+        rewards=reward_lines,
+        status=battle_vitals_lines(res) + [f"⚡ 精力余 {res['stamina_left']}"],
+    )
 
 
 @router.message(Command("explore"))

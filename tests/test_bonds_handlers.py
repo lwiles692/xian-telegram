@@ -7,6 +7,7 @@ import pytest
 import pytest_asyncio
 
 from config import realms as R
+from bot.presentation import plain_text
 from handlers import bonds as bonds_handler, me as me_handler
 from models import db
 from services import bonds, character
@@ -269,7 +270,8 @@ async def test_partner_首页展示互赠共修与_me_称号(temp_db):
                        if data.startswith("bond:cminvite:"))
     invite_cb = _Callback(a_id, invite_data)
     await bonds_handler.cb_bond_action(invite_cb)
-    me_text, _me_markup = await me_handler.render_me(a_id)
+    me_content, _me_markup = await me_handler.render_me(a_id)
+    me_text = plain_text(me_content)
 
     assert "道侣：" in text
     assert "今日可赠：疗伤丹×1" in text

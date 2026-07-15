@@ -2,6 +2,7 @@
 import pytest
 import pytest_asyncio
 
+from bot.presentation import plain_text
 from handlers import common
 from models import db
 from services import character, items, settle
@@ -167,7 +168,7 @@ def test_explore_timeout_loss_text_explains_remaining_hp():
     from handlers import explore as explore_handler
     from services.combat import round_limit_label
 
-    text = explore_handler._result_text({
+    content = explore_handler._result_text({
         "status": "ok",
         "map_key": "后山",
         "map": "青牛后山",
@@ -189,6 +190,7 @@ def test_explore_timeout_loss_text_explains_remaining_hp():
         "max_hp": 7879,
         "max_mp": 911,
     })
+    text = plain_text(content)
 
     assert f"久战 {round_limit_label()}未决" in text
     assert "气血 7879→4678/7879" in text

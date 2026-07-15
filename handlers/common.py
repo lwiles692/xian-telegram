@@ -6,15 +6,56 @@ import secrets
 import time
 from typing import Optional
 
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.utils.formatting import Bold, ExpandableBlockQuote, Text
 
+from bot.presentation import RichPage, escape_rich_html, show
 from models import db
 
 NEED_START = "道友尚未踏入仙途，请先发送 /start 测灵根、开启修行。"
 PRIVATE_ONLY = "养成诸事请移步私聊。群中暂且只留切磋、排行与宗门播报。"
 TOKEN_TTL_SECONDS = 15 * 60
 TOKEN_EXPIRED = "此操作已过期或已处理，请刷新页面后再试。"
+
+
+def battle_report_page(
+        *, page: str, title: str, outcome: str, log: list[str],
+        rewards: list[str], status: list[str]) -> RichPage:
+    """构造折叠斗法战报；日志折叠，所得与状态摘要保持可见。"""
+    log_rows = log or ["斗法无可记述。"]
+    log_text = "\n".join(log_rows)
+    fallback_parts = [
+        Bold(title), "\n", outcome,
+        "\n\n", ExpandableBlockQuote(Bold("斗法经过"), "\n", log_text),
+    ]
+    if rewards:
+        fallback_parts.extend([
+            "\n\n", Bold("所得机缘"),
+            *[part for row in rewards for part in ("\n", row)],
+        ])
+    if status:
+        fallback_parts.extend([
+            "\n\n", Bold("当前状态"),
+            *[part for row in status for part in ("\n", row)],
+        ])
+    reward_html = "" if not rewards else (
+        "<h2>所得机缘</h2><ul>" +
+        "".join(f"<li>{escape_rich_html(row)}</li>" for row in rewards) +
+        "</ul>")
+    status_html = "" if not status else (
+        "<h2>当前状态</h2><ul>" +
+        "".join(f"<li>{escape_rich_html(row)}</li>" for row in status) +
+        "</ul>")
+    rich_html = (
+        f"<h1>{escape_rich_html(title)}</h1>"
+        f"<p><b>{escape_rich_html(outcome)}</b></p>"
+        "<details><summary>斗法经过</summary>"
+        + "".join(f"<p>{escape_rich_html(row)}</p>" for row in log_rows)
+        + "</details>" + reward_html + status_html)
+    return RichPage(
+        page=page,
+        rich_html=rich_html,
+        fallback=Text(*fallback_parts))
 
 
 async def dm_link(bot) -> str:
@@ -193,13 +234,3 @@ def progress_bar(cur: int, total: int, width: int = 10) -> str:
         return "▰" * width
     filled = max(0, min(width, int(width * cur / total)))
     return "▰" * filled + "▱" * (width - filled)
-
-
-async def show(callback, text: str, markup=None):
-    """编辑回调消息；内容未变则静默，不可编辑则补发。"""
-    try:
-        await callback.message.edit_text(text, reply_markup=markup)
-    except TelegramBadRequest as e:
-        if "not modified" in str(e).lower():
-            return
-        await callback.message.answer(text, reply_markup=markup)
