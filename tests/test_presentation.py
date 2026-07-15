@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.methods import SendMessage
+from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
+from aiogram.methods import SendMessage, SendRichMessage
+from aiogram.types import InputRichMessage
 from aiogram.utils.formatting import Bold, Text
 
 from bot.presentation import (RichPage, answer, escape_rich_html, plain_text,
@@ -15,6 +16,14 @@ def _bad_request(message: str) -> TelegramBadRequest:
     return TelegramBadRequest(
         method=SendMessage(chat_id=1, text="占位"),
         message=message)
+
+
+def _not_found() -> TelegramNotFound:
+    return TelegramNotFound(
+        method=SendRichMessage(
+            chat_id=1,
+            rich_message=InputRichMessage(html="<p>占位</p>")),
+        message="Not Found")
 
 
 class FakeMessage:
@@ -153,6 +162,24 @@ async def test_answer_and_send_fall_back_for_rich_capability_errors(
 
     assert [kind for kind, _kwargs in message.answers] == ["rich", "regular"]
     assert [kind for kind, _kwargs in bot.sent] == ["rich", "regular"]
+
+
+@pytest.mark.asyncio
+async def test_answer_and_send_fall_back_when_rich_method_is_not_found(
+        monkeypatch, caplog):
+    error = _not_found()
+    page = RichPage("capability404", "<h1>能力</h1>", Text("实体回退"))
+    message = FakeMessage(rich_error=error)
+    bot = FakeBot(rich_error=error)
+    monkeypatch.setenv("RICH_MESSAGES_ENABLED", "true")
+
+    await answer(message, page)
+    await send(bot, 7, page)
+
+    assert [kind for kind, _kwargs in message.answers] == ["rich", "regular"]
+    assert [kind for kind, _kwargs in bot.sent] == ["rich", "regular"]
+    assert caplog.text.count("capability404") == 2
+    assert caplog.text.count("接口不支持") == 2
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,7 @@ try:
 except ImportError:  # Python 3.9 兼容
     TypeAlias = object
 
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 try:
     from aiogram.types import InputRichMessage
 except ImportError:  # aiogram 3.22 本地环境尚未提供 Rich 类型
@@ -108,6 +108,9 @@ async def answer(message, content: MessageContent, markup=None):
         try:
             return await message.answer_rich(
                 rich_message=_rich_input(content), reply_markup=markup)
+        except TelegramNotFound:
+            logger.warning("Rich 页面 %s 回复降级：接口不支持", content.page)
+            content = content.fallback
         except TelegramBadRequest as exc:
             category = _rich_error_category(exc)
             if category is None:
@@ -127,6 +130,9 @@ async def send(bot, chat_id: int | str, content: MessageContent, markup=None):
                 chat_id=chat_id,
                 rich_message=_rich_input(content),
                 reply_markup=markup)
+        except TelegramNotFound:
+            logger.warning("Rich 页面 %s 主动发送降级：接口不支持", content.page)
+            content = content.fallback
         except TelegramBadRequest as exc:
             category = _rich_error_category(exc)
             if category is None:
