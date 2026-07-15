@@ -284,6 +284,8 @@ git commit -m "实现八种合体神通"
 - Modify: `config/bosses.py`
 - Modify: `config/events.py`
 - Modify: `config/shop.py`
+- Modify: `services/dungeon.py`
+- Modify: `services/world_boss.py`
 - Modify: `services/shop.py`
 - Modify: `handlers/shop.py`
 - Create: `tests/test_skill_sources.py`

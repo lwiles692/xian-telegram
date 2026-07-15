@@ -142,9 +142,9 @@ CREATE TABLE IF NOT EXISTS hunt_daily (
 },
 ```
 
-- [ ] **Step 5：增加种族表和地图出没表**
+- [ ] **Step 5：增加种族表、地图出没表和来源短码**
 
-species key 使用短 ASCII，避免 callback data 超长。配置必须包含下列名称：
+species key 使用不超过 20 字节的短 ASCII，避免 callback data 超长。配置必须包含下列名称：
 
 | 档位 | 爆发 | 灼烧 | 疗愈 | 定身 | 稀有 |
 |---|---|---|---|---|---|
@@ -153,7 +153,7 @@ species key 使用短 ASCII，避免 callback data 超长。配置必须包含�
 | 炼虚 | 掣电天隼 | 蚀骨魔蛛 | 青鸾 | 憾山魁牛 | 太虚孔雀 |
 | 合体 | 噬金猰貐 | 烛阴幼蟒 | 九色神鹿 | 混沌玄武 | 星渊烛龙 |
 
-地图配置增加 `beasts={"common": (...), "rare": (...), "appear_rate": 0.12}`；仅元婴及以上地图配置。
+地图配置增加 `beasts={"common": (...), "rare": (...), "appear_rate": 0.12, "source_key": "r3e"}`；仅元婴及以上地图配置。`source_key` 在全部地图中唯一，使用不超过 8 字节的稳定 ASCII 短码，不得使用中文地图 key 或展示名。schema 测试同时断言 species key、source key 均为 ASCII、长度合规且 source key 不重复；在上述上限下，一次性 token callback 最长不超过 60 字节。
 
 - [ ] **Step 6：运行测试和完整回归**
 
@@ -187,6 +187,16 @@ git commit -m "建立灵兽配置与数据模型"
 
 覆盖：胜利后 12% 触发；失败消耗缚灵索并使 streak+1；成功清零；常见基础 35%、稀有 12%、每败+8%、总率≤90%；无缚灵索拒绝；兽栏满 3 不触发；过期 token 不调用 service，因此不计保底。
 
+遍历全部 species/source 组合生成真实一次性 callback，并按 Telegram 的 UTF-8 字节限制断言：
+
+```python
+data = await action_callback_data(
+    user_id,
+    f"beast:capture:{species_key}:explore-{source_key}",
+)
+assert len(data.encode("utf-8")) <= 64
+```
+
 并发测试使用两个不同有效 token 同时尝试第 3 个栏位，只允许一个 INSERT 成功，另一个返回 `kennel_full`。
 
 - [ ] **Step 2：运行测试并确认失败**
@@ -210,20 +220,22 @@ result["beast_encounter"] = {
     "species_key": species_key,
     "name": species_name(species_key),
     "rarity": species["rarity"],
-    "source": f"explore:{map_key}",
+    "source": f"explore:{map_cfg['beasts']['source_key']}",
 }
 ```
 
 handler 使用：
 
 ```python
+encounter = result["beast_encounter"]
+source_key = encounter["source"].removeprefix("explore:")
 await action_callback_data(
     user_id,
-    f"beast:capture:{species_key}:explore-{map_key}",
+    f"beast:capture:{encounter['species_key']}:explore-{source_key}",
 )
 ```
 
-拒绝按钮为普通导航，不改变 streak；token 15 分钟后自然失效。
+service 按 `source_key` 反查地图并校验该物种确属对应出没表；拒绝按钮为普通导航，不改变 streak；token 15 分钟后自然失效。
 
 - [ ] **Step 5：运行捕捉测试和完整回归**
 

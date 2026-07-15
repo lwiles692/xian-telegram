@@ -33,7 +33,6 @@
 **Files:**
 - Create: `tests/test_heti_loop.py`
 - Modify: `config/dungeons.py`
-- Modify: `tests/test_balance.py`
 
 - [ ] **Step 1：写九天玄宫配置失败测试**
 
@@ -66,21 +65,17 @@ Expected: `DUNGEONS["jiutian"]` 缺失导致 FAIL。
 
 新增 `jiutian`，普通怪两种、末层 Boss 一种；初版奖励范围为灵石 `5000—8200`、修为 `48_000`，掉落以合体三图材料和残方为主。不得在 M1 提前掉落征途令或 v4 神通残页；这些来源分别在 M4A 和 M6B 接入。
 
-- [ ] **Step 4：增加秘境门槛测试**
+- [ ] **Step 4：运行配置测试和完整回归**
 
-在 `tools/balance_sim.py` 接入前先用现有 `dungeon_clear_fraction()` 写失败断言：合体初期+炼虚装备通关层数比例 40%—70%，合体圆满+合体装备稳定通关不低于 90%。
+Run: `.venv/bin/python -m pytest tests/test_heti_loop.py -v`
 
-- [ ] **Step 5：运行相关测试和完整回归**
-
-Run: `.venv/bin/python -m pytest tests/test_heti_loop.py tests/test_balance.py -v`
-
-Expected: 本任务已加入的配置测试 PASS；尚未加入 Task 4 的数值门槛断言。
+Expected: 本任务加入的结构性配置测试 PASS；秘境数值门槛断言统一在 Task 4 落地。
 
 Run: `.venv/bin/python -m pytest`
 
-Expected: Task 1 提交前全量 PASS；若门槛尚未定参，将门槛断言放到 Task 4 再提交。
+Expected: Task 1 提交前全量 PASS。
 
-- [ ] **Step 6：提交 Task 1**
+- [ ] **Step 5：提交 Task 1**
 
 ```bash
 git add config/dungeons.py tests/test_heti_loop.py
@@ -241,6 +236,8 @@ git commit -m "增加噬星古鲲世界 Boss"
 - Produces: `heti_daily_loop_profile()`。
 
 - [ ] **Step 1：写合体装备档失败测试**
+
+九天玄宫的全部数值门槛断言统一在本任务落地；Task 1 只负责结构性配置测试，避免在 `HETI_GEARED` 尚未建立时提前提交不稳定断言。
 
 ```python
 assert B.HETI_EQUIP_KEYS == ["周天星刃", "阴阳道甲", "寂灭玄佩"]

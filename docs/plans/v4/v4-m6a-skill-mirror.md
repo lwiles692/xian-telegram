@@ -171,7 +171,7 @@ git commit -m "镜像旧功法写入新表"
 
 ---
 
-### Task 3：统一八种残页的 feature_pending 行为
+### Task 3：复验八种残页的 feature_pending 行为并补齐测试
 
 **Files:**
 - Modify: `config/items.py`
@@ -179,21 +179,23 @@ git commit -m "镜像旧功法写入新表"
 - Modify: `handlers/skills.py`
 - Create: `tests/test_skill_feature_pending.py`
 
-- [ ] **Step 1：写残页未开放失败测试**
+M4A Task 1 已预置八种残页，并在 `learn_skill_from_pages()` 中实现扣页前的通用 `feature_pending` guard。本任务以该实现为基线，负责复验八种残页、补齐回归测试和遗漏项，不得重复增加第二套 guard。
+
+- [ ] **Step 1：写八种残页封印回归测试**
 
 八种残页：混沌斩、噬魂火、霸体诀、天命一击、玄冰禁锢、净化心光、太虚剑意、星渊破。每种 `type='page'`、`need=3`、`feature_pending=True`。
 
 集齐后点击领悟返回 `feature_pending`，库存数量不变，新旧技能表均无该 skill。
 
-- [ ] **Step 2：运行测试并确认失败**
+- [ ] **Step 2：运行 M4A 基线复验**
 
 Run: `.venv/bin/python -m pytest tests/test_skill_feature_pending.py -v`
 
-Expected: guard 缺失或返回 bad_page 导致 FAIL。
+Expected: M4A 完整落地时 PASS；若个别残页定义、库存不变断言或 handler 状态映射缺失，则以具体失败项作为本任务的补齐范围。
 
-- [ ] **Step 3：实现消费前 guard**
+- [ ] **Step 3：补齐差异并保持单一 guard**
 
-`learn_skill_from_pages()` 在进入事务并扣页前检查：
+复用 M4A 已有的消费前检查，不移动到扣页之后，也不按技能分别写分支：
 
 ```python
 if item.get("feature_pending"):
@@ -201,6 +203,8 @@ if item.get("feature_pending"):
 ```
 
 handler 文案：“此神通尚在天机封印中，待功法对决层开启后方可领悟。”
+
+若基线复验已全部通过，本步骤只保留测试文件；若复验失败，仅修正缺失的 page 配置、通用 guard 或 handler 状态映射。
 
 - [ ] **Step 4：运行测试和完整回归**
 
@@ -216,7 +220,7 @@ Expected: 全量 PASS。
 
 ```bash
 git add config/items.py services/character.py handlers/skills.py tests/test_skill_feature_pending.py
-git commit -m "封印未开放的合体神通残页"
+git commit -m "补齐合体神通残页封印测试"
 ```
 
 ---
