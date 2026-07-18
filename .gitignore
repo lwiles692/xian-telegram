@@ -23,3 +23,9 @@ data/
 .DS_Store
 .serena/
 .claude/worktrees/
+
+# Hexo manual (static site)
+manual/public/
+manual/.deploy*/
+manual/db.json
+manual/_multiconfig.yml

@@ -18,6 +18,7 @@ models/     # db.py: SQLite access layer                  [has AGENTS.md]
 tools/      # offline utilities (balance_sim)
 tests/      # pytest + pytest-asyncio                     [has AGENTS.md]
 docs/       # spec.md, spec-v2.md, plans/v2/, USER_GUIDE.md
+manual/     # Hexo 静态玩家手册（全书 31 章，站内构建: `cd manual && npx hexo generate`）
 spec.md / spec-v2.md  # game design source of truth
 ```
 
@@ -96,3 +97,6 @@ SQLite auto-created at `data/xian.db` (gitignored). No CI, no Dockerfile, no Mak
 - Don't read vitals mid-battle to recompute — use the departure snapshot.
 - Don't use bare `aiogram` callback strings for state-changing actions — wrap with `action_callback_data`.
 - No `pyproject.toml`/ruff/mypy/pre-commit — don't introduce silently; discuss first.
+
+## Documentation Discipline
+- 游戏机制后续有变动时（新增/调整境界、地图、秘境、物品、配方、玩法规则、指令等），必须**马上同步更新** `manual/` 下对应的玩家手册章节（Hexo 源文在 `manual/source/_posts/`、目录在 `manual/source/menu.md`），并重新 `cd manual && npx hexo generate` 构建验证。手册是玩家权威参考，与实现脱节即为缺陷。
