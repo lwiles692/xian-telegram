@@ -62,7 +62,7 @@ SQLite auto-created at `data/xian.db` (gitignored). No CI, no Dockerfile, no Mak
 
 - 消息按信息密度分层：一句话成功、失败、资源不足、冷却和令牌提示使用 `str`；角色面板、商店、悬赏等交互页面使用 aiogram `Text` 实体；帮助、版本公告、历练/秘境/PvP 结算等长报告使用 `RichPage`。
 - 统一通过 `bot.presentation.answer()`、`show()`、`send()` 发送、编辑或主动播报。`RichPage` 必须同时提供 Rich HTML 与语义一致的 `Text` 回退；不要在 handler 中直接拼发送参数，也不要为两种格式重复查询业务数据。
-- 普通实体消息禁止依赖全局 `parse_mode`，发送参数必须显式保持 `parse_mode=None`。Rich 页面只使用 Rich HTML，不使用 Markdown/MarkdownV2。
+- 普通实体消息禁止依赖全局 `parse_mode`，发送参数必须显式保持 `parse_mode=None`。Rich 页面只使用 Rich HTML，不使用 Markdown/MarkdownV2。禁用 Markdown 是**主观工程选择**（Telegram 本身支持 Markdown/MarkdownV2），非平台限制：MarkdownV2 保留约 18 个特殊字符，动态文本（玩家名/宗门名/物品名/战斗日志）漏转义即 400 `can't parse entities`；HTML 仅需转义 `< > & " '`，配合实体拼装（`parse_mode=None`）转义面最小、表现层统一。（注：表格在 Markdown 与 HTML 下均无法渲染，是 Telegram 客观限制，与此选择无关。）
 - Rich HTML 中所有玩家名、宗门名、物品名、战斗日志和其他外部或动态文本必须经过 `escape_rich_html()`；静态标签集中在展示构造器中生成，禁止手写未转义的动态 HTML。
 - 长文首行使用粗体标题，核心状态紧跟标题；用真正的小节标题和空行表达层级，禁止用 `—— 标题 ——` 一类字符横线充当分隔线。列表每行只表达一个对象，编号、物品名或角色名作为视觉锚点。
 - 规则说明使用斜体或引用，操作提示放在末尾；已有按钮能表达的动作不再重复成长句。每个小节最多使用一个功能性 emoji，保持修仙口吻但避免满屏装饰。

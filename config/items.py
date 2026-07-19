@@ -139,38 +139,41 @@ def sell_price(key: str) -> int:
     return int(ITEMS.get(key, {}).get("sell", 0))
 
 
-# 法宝/装备增益 stat key → 中文标签映射（#35）
+# 法宝/装备增益 stat key → 中文标签映射（#35）。
+# 键序即展示序（format_bonus 固定顺序）：六维基础 → 六维加成 → 生产/闭关 → 特殊词条。
 STAT_LABEL = {
-    "atk": "攻击",
-    "mp": "法力",
-    "crit": "暴击",
     "hp": "气血",
+    "mp": "法力",
+    "atk": "攻击",
     "df": "防御",
     "spd": "速度",
-    "atk_pct": "攻击加成",
+    "crit": "暴击",
     "hp_pct": "气血加成",
-    "df_pct": "防御加成",
     "mp_pct": "法力加成",
-    "crit_pct": "暴击加成",
+    "atk_pct": "攻击加成",
+    "df_pct": "防御加成",
     "spd_pct": "速度加成",
+    "crit_pct": "暴击加成",
     "alchemy_pct": "丹术加成",
     "forge_pct": "炼器加成",
     "seclusion_pct": "闭关加成",
     "lifesteal_pct": "吸血",
     "reflect_pct": "反伤",
-    "initiative": "先手",
-    "crit_resist": "抗暴",
     "pierce": "穿透",
+    "crit_resist": "抗暴",
+    "initiative": "先手",
 }
+_STAT_ORDER = {k: i for i, k in enumerate(STAT_LABEL)}
 
 
 def format_bonus(bonus: dict) -> str:
-    """将 bonus dict 格式化为中文显示文本，如「攻击+340、法力+160、暴击率+30」。
+    """将 bonus dict 按固定顺序格式化为中文显示文本，如「气血+3240、防御+576、攻击加成+10%」。
 
-    _pct 后缀的值以百分比显示（0.12 → +12%），其余直接显示数值。
+    顺序统一取 STAT_LABEL 定义序（六维→加成→特殊词条），与词条来源无关；
+    未登记的键按原顺序排在末尾。_pct 后缀的值以百分比显示（0.12 → +12%），其余直接显示数值。
     """
     parts = []
-    for k, v in bonus.items():
+    for k, v in sorted(bonus.items(), key=lambda kv: _STAT_ORDER.get(kv[0], len(_STAT_ORDER))):
         label = STAT_LABEL.get(k, k)
         if k.endswith("_pct"):
             parts.append(f"{label}+{v * 100:.0f}%")

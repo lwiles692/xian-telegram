@@ -25,9 +25,10 @@ def test_dao_path_config_covers_five_paths_with_entry_scale():
 
 
 def test_dao_path_bonus_text_uses_chinese_labels():
+    # 入参乱序，输出按 STAT_LABEL 固定顺序（速度加成先于闭关加成）。
     text = dao_path_handler._bonus_text({"seclusion_pct": 0.11, "spd_pct": 0.06})
 
-    assert text == "闭关加成+11%、速度加成+6%"
+    assert text == "速度加成+6%、闭关加成+11%"
     assert "seclusion_pct" not in text
     assert "spd_pct" not in text
 

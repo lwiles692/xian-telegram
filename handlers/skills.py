@@ -5,6 +5,7 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.utils.formatting import Bold, Text
 
 from config import auction as auction_cfg
 from config.equipment import QIHUN_KEY
@@ -169,6 +170,41 @@ async def render_equipment_item(user_id: int, instance_id: int):
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _equipment_sort_key(inst: dict):
+    """法宝列表排序：已装备置顶，其余按编号升序。"""
+    return (0 if inst["equipped_slot"] else 1, int(inst["id"]))
+
+
+async def _render_equipment_list(user_id: int, instances: list[dict], qihun: int):
+    """法宝列表：每件一块「粗体锚点行 + 属性次行」，已装备置顶。"""
+    parts = [Bold("📖 法宝"), f"　器魂 ×{qihun} · 可用于强化/重铸"]
+    rows = []
+    for inst in sorted(instances, key=_equipment_sort_key):
+        locked = inst.get("status") == auction_cfg.INSTANCE_STATUS_AUCTION
+        lvl = inst.get("enhance_level", 0)
+        lvl_txt = f" +{lvl}" if lvl else ""
+        parts.append("\n\n")
+        parts.append(Bold(
+            f"#{inst['id']} {item_name(inst['base_key'])}{lvl_txt} · {_equipment_mark(inst)}"))
+        parts.append(f"\n{_bonus_text(inst)}")
+        if equipment_slot(inst["base_key"]) and not locked:
+            action = (
+                await action_callback_data(user_id, f"eq:unequip:{inst['id']}")
+                if inst["equipped_slot"]
+                else await action_callback_data(user_id, f"equip:{inst['id']}")
+            )
+            rows.append([
+                InlineKeyboardButton(
+                    text=f"{'卸下' if inst['equipped_slot'] else '装备'} #{inst['id']}",
+                    callback_data=action),
+                InlineKeyboardButton(
+                    text=f"操作 #{inst['id']}",
+                    callback_data=f"skills:item:{inst['id']}"),
+            ])
+    rows.append([InlineKeyboardButton(text="↩️ 返回功法", callback_data="nav:skills")])
+    return Text(*parts), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 async def render_skills_category(user_id: int, cat: str):
     char = await character.get(user_id)
     if not char:
@@ -177,36 +213,14 @@ async def render_skills_category(user_id: int, cat: str):
         return await render_skills(user_id)
     instances = await character.item_instances(user_id)
     inv = await character.inventory(user_id)
+    qihun = dict(inv).get(QIHUN_KEY, 0) if instances else 0
+    if cat == "equipment":
+        if not instances:
+            return await render_skills(user_id)
+        return await _render_equipment_list(user_id, instances, qihun)
     lines = [f"📖 {SKILL_CATEGORIES[cat]}"]
     rows = []
-    if instances:
-        qihun = dict(inv).get(QIHUN_KEY, 0)
-    else:
-        qihun = 0
-    if cat == "equipment" and instances:
-        lines.append(f"器魂 ×{qihun}，可用于强化/重铸。")
-        for inst in instances:
-            locked = inst.get("status") == auction_cfg.INSTANCE_STATUS_AUCTION
-            mark = _equipment_mark(inst)
-            lvl = inst.get("enhance_level", 0)
-            lvl_txt = f"+{lvl} " if lvl else ""
-            lines.append(
-                f"#{inst['id']} {lvl_txt}{item_name(inst['base_key'])}（{mark}，{_bonus_text(inst)}）")
-            if equipment_slot(inst["base_key"]) and not locked:
-                action = (
-                    await action_callback_data(user_id, f"eq:unequip:{inst['id']}")
-                    if inst["equipped_slot"]
-                    else await action_callback_data(user_id, f"equip:{inst['id']}")
-                )
-                rows.append([
-                    InlineKeyboardButton(
-                        text=f"{'卸下' if inst['equipped_slot'] else '装备'} #{inst['id']}",
-                        callback_data=action),
-                    InlineKeyboardButton(
-                        text=f"操作 #{inst['id']}",
-                        callback_data=f"skills:item:{inst['id']}"),
-                ])
-    elif cat == "pages":
+    if cat == "pages":
         page_buttons = []
         for key, qty, item in _learnable_pages(inv):
             lines.append(f"{item_name(key)} {qty}/{item['need']}：{skill_name(item['skill'])}")
