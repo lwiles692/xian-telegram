@@ -213,10 +213,10 @@ async def render_skills_category(user_id: int, cat: str):
         return await render_skills(user_id)
     instances = await character.item_instances(user_id)
     inv = await character.inventory(user_id)
-    qihun = dict(inv).get(QIHUN_KEY, 0) if instances else 0
     if cat == "equipment":
         if not instances:
             return await render_skills(user_id)
+        qihun = dict(inv).get(QIHUN_KEY, 0)
         return await _render_equipment_list(user_id, instances, qihun)
     lines = [f"📖 {SKILL_CATEGORIES[cat]}"]
     rows = []
